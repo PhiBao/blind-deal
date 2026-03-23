@@ -1,48 +1,28 @@
 {
-	"name": "cofhe-hardhat-starter",
-	"version": "0.3.1",
-	"description": "Starter repository for Fhenix CoFHE contract development",
+	"name": "blinddeal",
+	"version": "0.1.0",
+	"description": "Confidential P2P price negotiation on Fhenix using FHE",
 	"scripts": {
 		"test": "REPORT_GAS=true hardhat test",
 		"clean": "rimraf ./artifacts ./cache ./coverage ./types ./coverage.json ./deployments/localcofhe",
 		"compile": "hardhat compile",
-		"--------------": "",
-		" --- cofhe ---": "",
-		"  --------------": "",
-		"// task:deploy": "hardhat deploy",
-		"// task:addCount": "hardhat task:addCount",
-		"// task:getCount": "hardhat task:getCount",
-		"// ------------------- ": "",
-		"//  --- localcofhe ---": "",
-		"//    -------------------": "",
-		"// localcofhe:start": "hardhat localcofhe:start --clean true",
-		"localcofhe:test": "REPORT_GAS=true hardhat test --network localcofhe",
-		"localcofhe:faucet": "hardhat task:cofhe:usefaucet --network localcofhe",
-		"// localcofhe:deploy": "hardhat deploy --network localcofhe",
-		"// localcofhe:stop": "hardhat localcofhe:stop",
-		"// --------------------": "",
-		"//  --- sepolia ---": "",
-		"//   --------------------": "",
-		"eth-sepolia:deploy-counter": "hardhat deploy-counter --network eth-sepolia",
-		"eth-sepolia:increment-counter": "hardhat increment-counter --network eth-sepolia",
-		"eth-sepolia:reset-counter": "hardhat reset-counter --network eth-sepolia",
-		"// -------------------": "",
-		"//  --- arbitrum-sepolia ---": "",
-		"//   -------------------": "",
-		"arb-sepolia:deploy-counter": "hardhat deploy-counter --network arb-sepolia",
-		"arb-sepolia:increment-counter": "hardhat increment-counter --network arb-sepolia",
-		"arb-sepolia:reset-counter": "hardhat reset-counter --network arb-sepolia"
+		"-----": "",
+		" --- blinddeal (arb-sepolia) ---": "",
+		"  -----": "",
+		"arb-sepolia:deploy-blinddeal": "hardhat deploy-blinddeal --network arb-sepolia",
+		"arb-sepolia:create-deal": "hardhat create-deal --network arb-sepolia",
+		"arb-sepolia:submit-price": "hardhat submit-price --network arb-sepolia",
+		"arb-sepolia:finalize-deal": "hardhat finalize-deal --network arb-sepolia",
+		"------": "",
+		" --- blinddeal (eth-sepolia) ---": "",
+		"  ------": "",
+		"eth-sepolia:deploy-blinddeal": "hardhat deploy-blinddeal --network eth-sepolia",
+		"eth-sepolia:create-deal": "hardhat create-deal --network eth-sepolia",
+		"eth-sepolia:submit-price": "hardhat submit-price --network eth-sepolia",
+		"eth-sepolia:finalize-deal": "hardhat finalize-deal --network eth-sepolia"
 	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/fhenixprotocol/cofhe-hardhat-starter.git"
-	},
-	"author": "Fhenix",
+	"author": "",
 	"license": "MIT",
-	"bugs": {
-		"url": "https://github.com/fhenixprotocol/cofhe-hardhat-starter/issues"
-	},
-	"homepage": "https://github.com/fhenixprotocol/cofhe-hardhat-starter#readme",
 	"devDependencies": {
 		"@fhenixprotocol/cofhe-contracts": "^0.0.13",
 		"@fhenixprotocol/cofhe-mock-contracts": "^0.3.1",
@@ -71,11 +51,5 @@
 		"ts-node": ">=8.0.0",
 		"typechain": "^8.3.0",
 		"typescript": ">=4.5.0"
-	},
-	"devDependencies2": {
-		"@fhenixprotocol/cofhe-contracts": "0.0.13",
-		"@fhenixprotocol/cofhe-mock-contracts": "^0.3.0",
-		"cofhe-hardhat-plugin": "^0.3.0",
-		"cofhejs": "^0.3.0"
 	}
 }
