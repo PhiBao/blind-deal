@@ -35,6 +35,7 @@ contract BlindDeal {
     // ── Events ──────────────────────────────────────────────────────────
     event DealCreated(uint256 indexed dealId, address indexed buyer, address indexed seller, string description);
     event PriceSubmitted(uint256 indexed dealId, address indexed party);
+    event DealResolving(uint256 indexed dealId);
     event DealResolved(uint256 indexed dealId, DealState state);
     event DealCancelled(uint256 indexed dealId, address indexed cancelledBy);
 
@@ -48,12 +49,17 @@ contract BlindDeal {
     error DealExpired();
     error DealNotExpired();
     error InvalidDeadline();
+    error SelfDeal();
+    error ZeroAddress();
 
     // ── Create a new negotiation ────────────────────────────────────────
     /// @param _seller The counterparty's address
     /// @param _description Human-readable context for the deal
     /// @param _duration Seconds until deal expires (0 = no deadline)
     function createDeal(address _seller, string calldata _description, uint256 _duration) external returns (uint256 dealId) {
+        if (_seller == address(0)) revert ZeroAddress();
+        if (_seller == msg.sender) revert SelfDeal();
+
         dealId = dealCount++;
         Deal storage d = deals[dealId];
         d.buyer = msg.sender;
@@ -142,6 +148,8 @@ contract BlindDeal {
 
         // Publish match result for on-chain state transition
         FHE.decrypt(d.isMatch);
+
+        emit DealResolving(dealId);
     }
 
     /// @notice Finalize deal state after off-chain decryption of match result.
@@ -149,6 +157,7 @@ contract BlindDeal {
     function finalizeDeal(uint256 dealId) external {
         Deal storage d = deals[dealId];
         if (d.state != DealState.Open) revert DealNotOpen();
+        require(d.buyerSubmitted && d.sellerSubmitted, "Not resolved yet");
 
         (bool matched, bool decrypted) = FHE.getDecryptResultSafe(d.isMatch);
         require(decrypted, "Match result not ready");

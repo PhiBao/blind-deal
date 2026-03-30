@@ -71,6 +71,32 @@ describe('BlindDeal', function () {
 
 			expect(await blindDeal.getDealDeadline(0)).to.equal(0)
 		})
+
+		it('Should reject self-deal (buyer == seller)', async function () {
+			const { blindDeal, buyer } = await loadFixture(deployBlindDealFixture)
+
+			await expect(
+				blindDeal.connect(buyer).createDeal(buyer.address, 'Self deal', 0),
+			).to.be.revertedWithCustomError(blindDeal, 'SelfDeal')
+		})
+
+		it('Should reject zero address as seller', async function () {
+			const { blindDeal, buyer } = await loadFixture(deployBlindDealFixture)
+
+			await expect(
+				blindDeal.connect(buyer).createDeal('0x0000000000000000000000000000000000000000', 'Zero seller', 0),
+			).to.be.revertedWithCustomError(blindDeal, 'ZeroAddress')
+		})
+
+		it('Should reject finalizeDeal before prices submitted', async function () {
+			const { blindDeal, buyer, seller } = await loadFixture(deployBlindDealFixture)
+
+			await blindDeal.connect(buyer).createDeal(seller.address, 'Premature finalize', 0)
+
+			await expect(
+				blindDeal.finalizeDeal(0),
+			).to.be.revertedWith('Not resolved yet')
+		})
 	})
 
 	describe('Price Submission', function () {
