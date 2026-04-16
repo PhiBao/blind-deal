@@ -5,6 +5,11 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 
 export default defineConfig({
   plugins: [react(), wasm(), topLevelAwait()],
+  resolve: {
+    alias: {
+      'cofhejs/node': 'cofhejs/web',
+    },
+  },
   server: {
     port: 3000,
     fs: {

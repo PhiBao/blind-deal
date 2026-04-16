@@ -15,7 +15,7 @@ export function Dashboard({ onSelectDeal, onNavigate }: DashboardProps) {
     abi: BLIND_DEAL_ABI,
     functionName: 'getUserDeals',
     args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    query: { enabled: !!address, refetchInterval: 10000 },
   });
 
   if (!isConnected) {
@@ -75,7 +75,7 @@ function HeroSection({ onNavigate, showConnect }: { onNavigate: (page: 'dashboar
 
       {/* Feature pills */}
       <div className="flex flex-wrap justify-center gap-2 mb-10">
-        {['FHE Encrypted', 'Zero Knowledge', 'Fair Midpoint', 'Privacy First'].map((f) => (
+        {['FHE Encrypted', 'Condition Escrow', 'Cross-chain CCTP', 'Privacy First'].map((f) => (
           <span key={f} className="px-3 py-1 text-xs font-medium text-indigo-300 bg-indigo-500/10 rounded-full ring-1 ring-indigo-500/20">
             {f}
           </span>

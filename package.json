@@ -10,6 +10,7 @@
 		" --- blinddeal (arb-sepolia) ---": "",
 		"  -----": "",
 		"arb-sepolia:deploy-blinddeal": "hardhat deploy-blinddeal --network arb-sepolia",
+		"arb-sepolia:deploy-resolver": "hardhat deploy-resolver --network arb-sepolia",
 		"arb-sepolia:create-deal": "hardhat create-deal --network arb-sepolia",
 		"arb-sepolia:submit-price": "hardhat submit-price --network arb-sepolia",
 		"arb-sepolia:finalize-deal": "hardhat finalize-deal --network arb-sepolia",
@@ -17,6 +18,7 @@
 		" --- blinddeal (eth-sepolia) ---": "",
 		"  ------": "",
 		"eth-sepolia:deploy-blinddeal": "hardhat deploy-blinddeal --network eth-sepolia",
+		"eth-sepolia:deploy-resolver": "hardhat deploy-resolver --network eth-sepolia",
 		"eth-sepolia:create-deal": "hardhat create-deal --network eth-sepolia",
 		"eth-sepolia:submit-price": "hardhat submit-price --network eth-sepolia",
 		"eth-sepolia:finalize-deal": "hardhat finalize-deal --network eth-sepolia"

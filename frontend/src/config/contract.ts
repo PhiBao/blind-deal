@@ -5,6 +5,11 @@ const CONTRACT_ADDRESSES: Record<number, `0x${string}`> = {
   11155111: '0x348e8E6Da1278a625B0B13Ff81a55D3AA614f4aD', // Ethereum Sepolia
 };
 
+const RESOLVER_ADDRESSES: Record<number, `0x${string}`> = {
+  421614: '0x6792E51FBD24f9315282BD5b6c5E713dCc779C69', // Arbitrum Sepolia
+  11155111: '0x755001a47Ae2543B717CCb8A4e4E9C96c6E2343E', // Ethereum Sepolia
+};
+
 // Fallback for when no wallet is connected (e.g. read-only views)
 export const BLIND_DEAL_ADDRESS_FALLBACK = CONTRACT_ADDRESSES[421614];
 
@@ -12,6 +17,33 @@ export function useBlindDealAddress(): `0x${string}` {
   const chainId = useChainId();
   return CONTRACT_ADDRESSES[chainId] ?? BLIND_DEAL_ADDRESS_FALLBACK;
 }
+
+export function useResolverAddress(): `0x${string}` | undefined {
+  const chainId = useChainId();
+  return RESOLVER_ADDRESSES[chainId];
+}
+
+export const RESOLVER_ABI = [
+  {
+    inputs: [{ name: 'escrowId', type: 'uint256' }, { name: 'dealId', type: 'uint256' }],
+    name: 'linkEscrow', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'escrowId', type: 'uint256' }],
+    name: 'isConditionMet', outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view', type: 'function',
+  },
+  {
+    inputs: [{ name: 'escrowId', type: 'uint256' }],
+    name: 'registered', outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view', type: 'function',
+  },
+  {
+    inputs: [{ name: 'escrowId', type: 'uint256' }],
+    name: 'escrowToDeal', outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view', type: 'function',
+  },
+] as const;
 
 export const BLIND_DEAL_ABI = [
   // Errors

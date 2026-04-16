@@ -1,4 +1,4 @@
-import { useState, Component, type ReactNode, type ErrorInfo } from 'react';
+import { useState, useEffect, Component, type ReactNode, type ErrorInfo } from 'react';
 import { WagmiProvider, useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { arbitrumSepolia, sepolia } from 'wagmi/chains';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,6 +8,8 @@ import { Header } from './components/Header';
 import { Dashboard } from './components/Dashboard';
 import { CreateDeal } from './components/CreateDeal';
 import { DealDetail } from './components/DealDetail';
+import { DealToastContext } from './components/DealDetail';
+import { useToast, ToastContainer } from './components/Toast';
 
 const queryClient = new QueryClient();
 
@@ -102,39 +104,56 @@ function ChainGuard({ children }: { children: ReactNode }) {
 /* -------------------------------------------------- */
 function AppContent() {
   const [view, setView] = useState<View>({ page: 'dashboard' });
+  const { toasts, toast, update, dismiss } = useToast();
+
+  // Deep-link: ?deal=123 opens that deal directly
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dealParam = params.get('deal');
+    if (dealParam) {
+      try {
+        setView({ page: 'deal', dealId: BigInt(dealParam) });
+        // Clean up URL without reloading
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
+    }
+  }, []);
 
   return (
-    <div className="min-h-screen bg-[#0b0f1a] relative overflow-hidden">
-      {/* Background gradient orbs */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 -left-40 w-80 h-80 bg-violet-600/8 rounded-full blur-3xl" />
-        <div className="absolute -bottom-20 right-1/3 w-72 h-72 bg-indigo-500/5 rounded-full blur-3xl" />
+    <DealToastContext.Provider value={{ toast, update }}>
+      <div className="min-h-screen bg-[#0b0f1a] relative overflow-hidden">
+        {/* Background gradient orbs */}
+        <div className="fixed inset-0 pointer-events-none">
+          <div className="absolute -top-40 -right-40 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" />
+          <div className="absolute top-1/2 -left-40 w-80 h-80 bg-violet-600/8 rounded-full blur-3xl" />
+          <div className="absolute -bottom-20 right-1/3 w-72 h-72 bg-indigo-500/5 rounded-full blur-3xl" />
+        </div>
+        <div className="relative z-10">
+          <Header
+            onNavigate={(page) => setView({ page } as View)}
+            currentPage={view.page}
+          />
+          <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+            {view.page === 'dashboard' && (
+              <Dashboard
+                onSelectDeal={(id) => setView({ page: 'deal', dealId: id })}
+                onNavigate={(page) => setView({ page } as View)}
+              />
+            )}
+            {view.page === 'create' && (
+              <CreateDeal onCreated={(id) => setView({ page: 'deal', dealId: id })} />
+            )}
+            {view.page === 'deal' && (
+              <DealDetail
+                dealId={view.dealId}
+                onBack={() => setView({ page: 'dashboard' })}
+              />
+            )}
+          </main>
+        </div>
+        <ToastContainer toasts={toasts} onDismiss={dismiss} />
       </div>
-      <div className="relative z-10">
-        <Header
-          onNavigate={(page) => setView({ page } as View)}
-          currentPage={view.page}
-        />
-        <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-          {view.page === 'dashboard' && (
-            <Dashboard
-              onSelectDeal={(id) => setView({ page: 'deal', dealId: id })}
-              onNavigate={(page) => setView({ page } as View)}
-            />
-          )}
-          {view.page === 'create' && (
-            <CreateDeal onCreated={(id) => setView({ page: 'deal', dealId: id })} />
-          )}
-          {view.page === 'deal' && (
-            <DealDetail
-              dealId={view.dealId}
-              onBack={() => setView({ page: 'dashboard' })}
-            />
-          )}
-        </main>
-      </div>
-    </div>
+    </DealToastContext.Provider>
   );
 }
 

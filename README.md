@@ -318,7 +318,6 @@ Every encrypted value has an **Access Control List (ACL)**. Without `allowThis`,
 
 | | |
 |---|---|
-| **Live App** | [https://frontend-five-mu-v0z5sr5dlc.vercel.app](https://frontend-five-mu-v0z5sr5dlc.vercel.app) |
 | **Supported Chains** | Arbitrum Sepolia, Ethereum Sepolia |
 
 ### Smart Contracts
@@ -516,46 +515,37 @@ Faucets:
 - [x] Deployed to Arbitrum Sepolia and Ethereum Sepolia
 - [x] Full documentation: architecture, FHE deep dive, privacy model, roadmap
 
-### Wave 2 — React Frontend (Mar 30–Apr 6) ✅
+### Wave 2 — Frontend + Escrow Settlement (Mar 30–Apr 6) ✅
 
-- [x] Vite + React 18 + TypeScript + Tailwind CSS app with `@cofhe/react` hooks
-- [x] Wagmi wallet connection (injected — MetaMask, Rabby, etc.)
-- [x] Multi-chain contract routing (Arbitrum Sepolia + Ethereum Sepolia)
-- [x] Deal creation form with seller address, description, duration presets
-- [x] FHE-encrypted price submission UI (buyer max / seller min via `useCofheEncrypt`)
-- [x] Real-time deal status with per-party submission indicators
-- [x] Deal finalization, cancellation, and expiry flows
-- [x] Matched deal result view (encrypted price handle + CoFHE unseal instructions)
-- [x] Dark crypto-native UI: glass morphism, gradient accents, animated hero
-- [x] React Error Boundary + chain-unsupported guard with one-click chain switch
-- [x] COOP/COEP headers for `SharedArrayBuffer` / WASM support
-- [x] Deployed to Vercel: [https://frontend-five-mu-v0z5sr5dlc.vercel.app](https://frontend-five-mu-v0z5sr5dlc.vercel.app)
+- [x] Vite + React 18 + TypeScript + Tailwind CSS frontend with `@cofhe/react` hooks
+- [x] Wagmi wallet connection + multi-chain routing (Arbitrum Sepolia + Ethereum Sepolia)
+- [x] Full deal lifecycle UI: create, submit encrypted prices, finalize, cancel, expire
+- [x] FHE price unsealing via `cofheClient.decryptForView()` with auto-permits
+- [x] `@reineira-os/sdk` escrow settlement: create → fund (USDC) → redeem
+- [x] End-to-end testnet flow working + deployed on Vercel
 
-### Wave 3 — Privara Escrow Integration (Apr 8–May 8)
+### Wave 3 — Telegram Bot + Notifications (Apr 8–Apr 20)
 
-- [ ] Integrate `@reineira-os/sdk` for settlement
-- [ ] On match: auto-create Privara escrow with midpoint as deal amount
-- [ ] Buyer funds escrow with encrypted USDC (`sdk.escrow.fund()`)
-- [ ] Seller redeems on deal completion (`sdk.escrow.redeem()`)
-- [ ] Cross-chain settlement via CCTP (fund from Ethereum Sepolia, settle on Arb)
+- [ ] Telegram Bot (`grammy` / `telegraf`) — notify participants on deal events
+- [ ] Webhook listener: `PriceSubmitted`, `DealResolving`, `DealResolved` events → Telegram DM
+- [ ] Push notification service: browser push for deal state changes
+- [ ] Deal share links: generate invite URL for seller counterparty
+
+### Wave 4 — Multi-Deal Marketplace (Apr 21–May 10)
+
 - [ ] Multi-deal marketplace: browse open deals, deal history
-- [ ] Condition resolver: auto-release escrow when deal is finalized
+- [ ] Bid from Telegram: `/create`, `/submit <price>`, `/status <dealId>` commands
+- [ ] Deep-link Telegram → frontend for wallet signing flows
 
-### Wave 4 — Reputation & Optimization (May 11–20)
+### Wave 5 — Agent + Advanced Features (May 11–Jun 1)
 
-- [ ] On-chain reputation scoring (deals completed, match rate)
-- [ ] Gas optimization: pre-compute encrypted constants, batch operations
-- [ ] Deal expiry: auto-cancel if counterparty doesn't submit within deadline
-- [ ] Email/Telegram notification via webhook when counterparty submits
+- [ ] AI negotiation agent: auto-suggest price ranges based on market data
+- [ ] Agent bidding: delegate encrypted price submission to an AI agent
+- [ ] On-chain reputation scoring (deals completed, match rate, response time)
 - [ ] Multiple price dimensions (price + timeline + scope)
-
-### Wave 5 — Polish & Showcase (May 23–Jun 1)
-
-- [ ] Multi-network deployment (Arbitrum Sepolia + Base Sepolia)
-- [ ] Contract verification on Arbiscan / Basescan
-- [ ] Demo video: end-to-end negotiation flow
+- [ ] Cross-chain settlement via CCTP (fund from Ethereum Sepolia, settle on Arb)
+- [ ] Contract verification on Arbiscan / Etherscan
 - [ ] Landing page with protocol explanation
-- [ ] Documentation site
 - [ ] Security review against FHE-specific patterns
 
 ---
@@ -569,8 +559,8 @@ Faucets:
 | **Client SDK** | `cofhejs` (encrypt, unseal, permits) |
 | **Dev Framework** | Hardhat 2.22, `cofhe-hardhat-plugin` (mock FHE) |
 | **Testing** | Mocha, Chai, `@nomicfoundation/hardhat-toolbox` |
-| **Settlement (Wave 3)** | `@reineira-os/sdk` (Privara escrow, insurance) |
-| **Frontend (Wave 2)** | Next.js, `@cofhe/react`, RainbowKit |
+| **Settlement** | `@reineira-os/sdk` (escrow create, fund, redeem) |
+| **Frontend** | Vite + React 18, `@cofhe/react`, wagmi, Tailwind CSS |
 | **Networks** | Arbitrum Sepolia, Ethereum Sepolia, Base Sepolia |
 
 ---

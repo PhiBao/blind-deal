@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { parseEventLogs } from 'viem';
 import { BLIND_DEAL_ABI, useBlindDealAddress } from '../config/contract';
 
 interface CreateDealProps {
@@ -14,7 +15,19 @@ export function CreateDeal({ onCreated }: CreateDealProps) {
   const [duration, setDuration] = useState('3600'); // 1 hour default
 
   const { writeContract, data: txHash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess, data: receipt } = useWaitForTransactionReceipt({ hash: txHash });
+
+  useEffect(() => {
+    if (!isSuccess || !receipt) return;
+    try {
+      const logs = parseEventLogs({ abi: BLIND_DEAL_ABI, logs: receipt.logs, eventName: 'DealCreated' });
+      if (logs.length > 0) {
+        onCreated(logs[0].args.dealId);
+        return;
+      }
+    } catch {}
+    onCreated(0n);
+  }, [isSuccess, receipt]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,17 +133,7 @@ export function CreateDeal({ onCreated }: CreateDealProps) {
 
         {isSuccess && txHash && (
           <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-            <p className="text-sm text-emerald-400 mb-2">Deal created successfully!</p>
-            <button
-              type="button"
-              onClick={() => {
-                // Parse dealId from events — for now navigate back to dashboard
-                onCreated(0n);
-              }}
-              className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
-            >
-              Go to Dashboard →
-            </button>
+            <p className="text-sm text-emerald-400">Deal created successfully! Redirecting...</p>
           </div>
         )}
       </form>

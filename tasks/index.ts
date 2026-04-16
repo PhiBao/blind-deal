@@ -1,4 +1,5 @@
 export * from './deploy-blinddeal'
+export * from './deploy-resolver'
 export * from './create-deal'
 export * from './submit-price'
 export * from './finalize-deal'
