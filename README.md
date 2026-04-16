@@ -314,6 +314,15 @@ Every encrypted value has an **Access Control List (ACL)**. Without `allowThis`,
 
 ## Live Deployments
 
+### Frontend
+
+| | |
+|---|---|
+| **Live App** | [https://frontend-five-mu-v0z5sr5dlc.vercel.app](https://frontend-five-mu-v0z5sr5dlc.vercel.app) |
+| **Supported Chains** | Arbitrum Sepolia, Ethereum Sepolia |
+
+### Smart Contracts
+
 | Network | Contract Address | Explorer |
 |---------|-----------------|----------|
 | **Arbitrum Sepolia** | `0x6f7665a7aD14c5DAE617BFec7E80d616DA1Aab7A` | [View on Arbiscan](https://sepolia.arbiscan.io/address/0x6f7665a7aD14c5DAE617BFec7E80d616DA1Aab7A) |
@@ -507,15 +516,20 @@ Faucets:
 - [x] Deployed to Arbitrum Sepolia and Ethereum Sepolia
 - [x] Full documentation: architecture, FHE deep dive, privacy model, roadmap
 
-### Wave 2 — React Frontend (Mar 30–Apr 6)
+### Wave 2 — React Frontend (Mar 30–Apr 6) ✅
 
-- [ ] Next.js app with `@cofhe/react` hooks (`useEncrypt`, `useWrite`, `useDecrypt`)
-- [ ] Wallet connection (RainbowKit / ConnectKit)
-- [ ] Deal creation form with seller address + description
-- [ ] Encrypted price submission UI (buyer and seller views)
-- [ ] Real-time deal status tracking (Open → Resolving → Matched/NoMatch)
-- [ ] Deal price reveal UX for matched deals
-- [ ] Deploy to Arbitrum Sepolia testnet
+- [x] Vite + React 18 + TypeScript + Tailwind CSS app with `@cofhe/react` hooks
+- [x] Wagmi wallet connection (injected — MetaMask, Rabby, etc.)
+- [x] Multi-chain contract routing (Arbitrum Sepolia + Ethereum Sepolia)
+- [x] Deal creation form with seller address, description, duration presets
+- [x] FHE-encrypted price submission UI (buyer max / seller min via `useCofheEncrypt`)
+- [x] Real-time deal status with per-party submission indicators
+- [x] Deal finalization, cancellation, and expiry flows
+- [x] Matched deal result view (encrypted price handle + CoFHE unseal instructions)
+- [x] Dark crypto-native UI: glass morphism, gradient accents, animated hero
+- [x] React Error Boundary + chain-unsupported guard with one-click chain switch
+- [x] COOP/COEP headers for `SharedArrayBuffer` / WASM support
+- [x] Deployed to Vercel: [https://frontend-five-mu-v0z5sr5dlc.vercel.app](https://frontend-five-mu-v0z5sr5dlc.vercel.app)
 
 ### Wave 3 — Privara Escrow Integration (Apr 8–May 8)
 
