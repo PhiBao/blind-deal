@@ -65,6 +65,13 @@ function ChainGuard({ children }: { children: ReactNode }) {
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
 
+  // Auto-switch to Arbitrum Sepolia when connected to unsupported chain
+  useEffect(() => {
+    if (isConnected && !SUPPORTED_CHAIN_IDS.includes(chainId)) {
+      switchChain({ chainId: arbitrumSepolia.id });
+    }
+  }, [isConnected, chainId, switchChain]);
+
   if (isConnected && !SUPPORTED_CHAIN_IDS.includes(chainId)) {
     return (
       <div className="min-h-screen bg-[#0b0f1a] flex items-center justify-center px-4">

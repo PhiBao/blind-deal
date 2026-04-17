@@ -6,19 +6,22 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
   useChainId,
+  usePublicClient,
 } from 'wagmi';
-import { useCofheEncrypt, useCofheClient } from '@cofhe/react';
+import { useCofheEncrypt, useCofheClient, useCofheConnection } from '@cofhe/react';
 import { Encryptable, FheTypes } from '@cofhe/sdk';
 import {
   BLIND_DEAL_ABI,
   useBlindDealAddress,
   useResolverAddress,
   RESOLVER_ABI,
+  ESCROW_ABI,
+  useEscrowAddress,
   DealState,
   DEAL_STATE_LABELS,
   DEAL_STATE_COLORS,
 } from '../config/contract';
-import { useReineiraSDK, getStoredEscrowId, storeEscrowId } from '../hooks/useReineira';
+import { getStoredEscrowId, storeEscrowId } from '../hooks/useEscrow';
 import type { ToastType } from './Toast';
 
 // ── Toast context (provided by App) ─────────────────────────────────
@@ -388,9 +391,47 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
 
 function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () => void }) {
   const contractAddress = useBlindDealAddress();
-  const { toast, update } = useContext(DealToastContext);
-  const { writeContract, data: txHash, isPending, error } = useWriteContract();
+  const { toast } = useContext(DealToastContext);
+  const cofheClient = useCofheClient();
+  const cofheConnection = useCofheConnection();
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+
+  // Read the encrypted match handle from contract
+  const { data: matchHandle } = useReadContract({
+    address: contractAddress,
+    abi: BLIND_DEAL_ABI,
+    functionName: 'getMatchResult',
+    args: [dealId],
+  });
+
+  // Client-side CoFHE SDK decryption of the match result
+  const [matchResult, setMatchResult] = useState<boolean | null>(null);
+  const [decryptStatus, setDecryptStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [decryptError, setDecryptError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handle = matchHandle as bigint | undefined;
+    if (!handle || handle === 0n || !cofheClient || !cofheConnection.connected || decryptStatus !== 'idle') return;
+
+    let cancelled = false;
+    setDecryptStatus('loading');
+
+    cofheClient
+      .decryptForView(handle, FheTypes.Bool)
+      .execute()
+      .then((val) => {
+        if (!cancelled) { setMatchResult(!!val); setDecryptStatus('done'); }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDecryptError(err instanceof Error ? err.message : 'Failed to decrypt match result');
+          setDecryptStatus('error');
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [matchHandle, cofheClient, cofheConnection.connected]);
 
   useEffect(() => {
     if (isSuccess) {
@@ -398,6 +439,17 @@ function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () 
       onSuccess();
     }
   }, [isSuccess]);
+
+  const handleFinalize = () => {
+    if (matchResult == null) return;
+    toast('loading', 'Finalizing deal...');
+    writeContract({
+      address: contractAddress,
+      abi: BLIND_DEAL_ABI,
+      functionName: 'clientFinalizeDeal',
+      args: [dealId, matchResult],
+    });
+  };
 
   return (
     <div className="space-y-3">
@@ -407,24 +459,42 @@ function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () 
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
         </div>
-        <p className="text-sm text-slate-400 mb-3">Both prices encrypted &amp; submitted. FHE comparison is ready.</p>
+        <p className="text-sm text-slate-400 mb-3">
+          {decryptStatus === 'done'
+            ? `CoFHE decryption complete — prices ${matchResult ? 'matched' : 'did not match'}. Ready to finalize.`
+            : decryptStatus === 'error'
+              ? 'Could not decrypt match result. Retrying...'
+              : 'Both prices encrypted & submitted. Decrypting match result via CoFHE SDK...'}
+        </p>
       </div>
 
-      <button
-        onClick={() => {
-          toast('loading', 'Finalizing deal...');
-          writeContract({ address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'finalizeDeal', args: [dealId] });
-        }}
-        disabled={isPending || isConfirming}
-        className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-600/20"
-      >
-        {isPending ? 'Confirm in wallet...' : isConfirming ? 'Finalizing...' : 'Finalize Deal'}
-      </button>
+      {decryptStatus !== 'done' ? (
+        <div className="space-y-2">
+          <div className="w-full py-3 bg-white/[0.04] border border-white/10 text-slate-400 font-medium rounded-xl text-center">
+            <span className="inline-block w-4 h-4 border-2 border-slate-500 border-t-transparent rounded-full animate-spin mr-2 align-middle" />
+            {decryptStatus === 'error' ? 'Decryption failed' : 'Decrypting match result via CoFHE...'}
+          </div>
+          {decryptStatus === 'error' && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+              <p className="text-xs text-amber-400 mb-1">{decryptError}</p>
+              <button onClick={() => setDecryptStatus('idle')} className="text-xs text-indigo-400 hover:text-indigo-300">Retry →</button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <button
+          onClick={handleFinalize}
+          disabled={isPending || isConfirming}
+          className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-600/20"
+        >
+          {isPending ? 'Confirm in wallet...' : isConfirming ? 'Finalizing...' : 'Finalize Deal'}
+        </button>
+      )}
 
-      {error && (
+      {writeError && (
         <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
           <p className="text-sm text-red-400">
-            {error.message.includes('not ready') ? 'Decryption not ready yet. Try again in a few seconds.' : error.message.split('\n')[0]}
+            {writeError.message.split('\n')[0]}
           </p>
         </div>
       )}
@@ -500,6 +570,7 @@ function MatchedSection({
   const resolverAddress = useResolverAddress();
   const chainId = useChainId();
   const cofheClient = useCofheClient();
+  const cofheConnection = useCofheConnection();
   const { toast, update } = useContext(DealToastContext);
 
   // Read deal price handle
@@ -518,7 +589,7 @@ function MatchedSection({
   const [unsealError, setUnsealError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!priceHandle || priceHandle === 0n || !cofheClient || unsealStatus !== 'idle') return;
+    if (!priceHandle || priceHandle === 0n || !cofheClient || !cofheConnection.connected || unsealStatus !== 'idle') return;
 
     let cancelled = false;
     setUnsealStatus('loading');
@@ -534,10 +605,12 @@ function MatchedSection({
       });
 
     return () => { cancelled = true; };
-  }, [priceHandle, cofheClient]);
+  }, [priceHandle, cofheClient, cofheConnection.connected]);
 
-  // Reineira Escrow state
-  const { sdk: reineiraSDK, isInitializing: isSdkInit, error: sdkError } = useReineiraSDK();
+  // ── Escrow state (direct contract calls, bypassing cofhejs@0.3.1) ──
+  const escrowAddress = useEscrowAddress();
+  const { address: userAddress } = useAccount();
+  const publicClient = usePublicClient();
   const [escrowId, setEscrowId] = useState<bigint | null>(() => getStoredEscrowId(dealId, chainId));
   const [escrowStatus, setEscrowStatus] = useState<'none' | 'created' | 'linking' | 'linked' | 'funded' | 'redeemed'>('none');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -563,19 +636,24 @@ function MatchedSection({
     query: { enabled: escrowId != null && !!resolverAddress && isRegistered === true, refetchInterval: 10000 },
   });
 
-  // Check escrow funding on load
+  // Check escrow funding on load via EscrowFunded events
   useEffect(() => {
-    if (!reineiraSDK || escrowId == null) return;
-    const escrow = reineiraSDK.escrow.get(escrowId);
-    escrow.isFunded().then((funded) => {
-      if (funded) setEscrowStatus('funded');
+    if (!publicClient || escrowId == null || !escrowAddress) return;
+    publicClient.getContractEvents({
+      address: escrowAddress,
+      abi: ESCROW_ABI,
+      eventName: 'EscrowFunded',
+      args: { escrowId },
+      fromBlock: 0n,
+    }).then((events) => {
+      if (events.length > 0) setEscrowStatus('funded');
       else if (isRegistered) setEscrowStatus('linked');
       else setEscrowStatus('created');
     }).catch(() => {
       if (isRegistered) setEscrowStatus('linked');
       else setEscrowStatus('created');
     });
-  }, [reineiraSDK, escrowId, isRegistered]);
+  }, [publicClient, escrowId, escrowAddress, isRegistered]);
 
   // Link escrow to resolver tx
   const { writeContract: writeLinkEscrow, data: linkTxHash } = useWriteContract();
@@ -588,31 +666,57 @@ function MatchedSection({
     }
   }, [linkSuccess]);
 
+  // Redeem escrow TX
+  const { writeContract: writeRedeemEscrow, data: redeemTxHash } = useWriteContract();
+  const { isSuccess: redeemSuccess } = useWaitForTransactionReceipt({ hash: redeemTxHash });
+
+  useEffect(() => {
+    if (redeemSuccess) {
+      setEscrowStatus('redeemed');
+      setIsProcessing(false);
+      toast('success', 'Escrow redeemed! Settlement complete.');
+    }
+  }, [redeemSuccess]);
+
   // ── Handlers ──────────────────────────────────────────────────────
 
   const handleCreateEscrow = async () => {
-    if (!reineiraSDK || unsealedPrice == null || !seller || !resolverAddress) return;
+    if (unsealedPrice == null || !seller || !resolverAddress || !escrowAddress) return;
     setIsProcessing(true);
     setEscrowError(null);
-    const tid = toast('loading', 'Creating escrow with condition resolver...');
+    const tid = toast('loading', 'Creating escrow via Privara...');
 
     try {
-      const escrow = await reineiraSDK.escrow
-        .build()
-        .amount(reineiraSDK.usdc(Number(unsealedPrice)))
-        .owner(seller)
-        .condition(resolverAddress)
-        .create();
+      const response = await fetch('/api/escrow/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: Number(unsealedPrice),
+          owner: seller,
+          resolver: resolverAddress,
+        }),
+      });
 
-      storeEscrowId(dealId, chainId, escrow.id);
-      setEscrowId(escrow.id);
-      setEscrowStatus('created');
-      update(tid, 'success', `Escrow #${escrow.id} created`);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'API request failed');
+      }
+
+      if (data.escrow_id != null) {
+        const newEscrowId = BigInt(data.escrow_id);
+        storeEscrowId(dealId, chainId, newEscrowId);
+        setEscrowId(newEscrowId);
+        setEscrowStatus('created');
+        setIsProcessing(false);
+        update(tid, 'success', `Escrow #${newEscrowId} created`);
+      } else {
+        update(tid, 'info', `Escrow created (tx: ${data.tx_hash?.slice(0, 14)}...) — check Arbiscan for ID`);
+        setIsProcessing(false);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create escrow';
       setEscrowError(msg);
       update(tid, 'error', msg);
-    } finally {
       setIsProcessing(false);
     }
   };
@@ -630,90 +734,55 @@ function MatchedSection({
   };
 
   const handleFundEscrow = async () => {
-    if (!reineiraSDK || escrowId == null || unsealedPrice == null) return;
+    if (escrowId == null || unsealedPrice == null || !escrowAddress) return;
     setIsProcessing(true);
     setEscrowError(null);
 
     if (fundMode === 'cross-chain') {
-      await handleFundCrossChain();
-    } else {
-      await handleFundLocal();
+      setEscrowError('Cross-chain funding is not available yet. Use local fund.');
+      setIsProcessing(false);
+      return;
     }
-    setIsProcessing(false);
-  };
 
-  const handleFundLocal = async () => {
-    const tid = toast('loading', 'Funding escrow (same chain)...');
+    const tid = toast('loading', 'Funding escrow via Privara...');
     try {
-      const escrow = reineiraSDK!.escrow.get(escrowId!);
-      await escrow.fund(reineiraSDK!.usdc(Number(unsealedPrice!)), { autoApprove: true });
+      const response = await fetch('/api/escrow/fund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          escrowId: escrowId.toString(),
+          amount: Number(unsealedPrice),
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Fund request failed');
+      }
+
       setEscrowStatus('funded');
-      update(tid, 'success', 'Escrow funded!');
+      setIsProcessing(false);
+      update(tid, 'success', `Escrow funded (tx: ${data.tx_hash?.slice(0, 14)}...)`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fund escrow';
       setEscrowError(msg);
       update(tid, 'error', msg);
-    }
-  };
-
-  const handleFundCrossChain = async () => {
-    const tid = toast('loading', 'Starting cross-chain CCTP transfer...');
-    try {
-      setCctpProgress('Initiating CCTP burn on Ethereum Sepolia...');
-      const escrow = reineiraSDK!.escrow.get(escrowId!);
-
-      const result = await escrow.fund(reineiraSDK!.usdc(Number(unsealedPrice!)), {
-        autoApprove: true,
-        crossChain: {
-          sourceRpc: 'https://ethereum-sepolia.publicnode.com',
-        },
-        waitForSettlement: false,
-      });
-
-      update(tid, 'loading', 'USDC burned. Waiting for CCTP attestation...');
-      setCctpProgress('USDC burned on source chain. Waiting for CCTP attestation & mint...');
-
-      if (result.waitForSettlement) {
-        try {
-          await result.waitForSettlement(600_000);
-          setEscrowStatus('funded');
-          setCctpProgress(null);
-          update(tid, 'success', 'Cross-chain settlement complete!');
-        } catch {
-          setCctpProgress('Settlement pending — check back in a few minutes.');
-          update(tid, 'info', 'CCTP transfer initiated. Settlement may take a few minutes.');
-        }
-      } else {
-        setCctpProgress(null);
-        setEscrowStatus('funded');
-        update(tid, 'success', 'Cross-chain fund initiated!');
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Cross-chain fund failed';
-      setEscrowError(msg);
-      setCctpProgress(null);
-      update(tid, 'error', msg);
+      setIsProcessing(false);
     }
   };
 
   const handleRedeemEscrow = async () => {
-    if (!reineiraSDK || escrowId == null) return;
+    if (escrowId == null || !escrowAddress) return;
     setIsProcessing(true);
     setEscrowError(null);
-    const tid = toast('loading', 'Redeeming escrow...');
+    toast('loading', 'Confirm redemption in wallet...');
 
-    try {
-      const escrow = reineiraSDK.escrow.get(escrowId);
-      await escrow.redeem();
-      setEscrowStatus('redeemed');
-      update(tid, 'success', 'Escrow redeemed! Settlement complete.');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to redeem escrow';
-      setEscrowError(msg);
-      update(tid, 'error', msg);
-    } finally {
-      setIsProcessing(false);
-    }
+    writeRedeemEscrow({
+      address: escrowAddress,
+      abi: ESCROW_ABI,
+      functionName: 'redeem',
+      args: [escrowId],
+    });
   };
 
   // Settlement progress steps
@@ -768,7 +837,7 @@ function MatchedSection({
         <div className="pt-4 border-t border-white/[0.06]">
           <div className="flex items-center gap-2 mb-3">
             <h3 className="text-sm font-semibold text-white">Escrow Settlement</h3>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 ring-1 ring-violet-500/20">Reineira</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 ring-1 ring-violet-500/20">Privara</span>
             {conditionMet && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">Condition Met</span>
             )}
@@ -781,13 +850,15 @@ function MatchedSection({
 
           {/* Step 1: Create escrow (buyer) */}
           {escrowId == null && isBuyer && (
-            <button
-              onClick={handleCreateEscrow}
-              disabled={isProcessing || isSdkInit || !reineiraSDK}
-              className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-medium rounded-xl hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-600/20"
-            >
-              {isSdkInit ? 'Initializing Reineira...' : isProcessing ? 'Creating...' : `Create Escrow — ${unsealedPrice} USDC`}
-            </button>
+            <>
+              <button
+                onClick={handleCreateEscrow}
+                disabled={isProcessing || !escrowAddress || !cofheConnection.connected}
+                className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-medium rounded-xl hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-600/20"
+              >
+                {!cofheConnection.connected ? 'Connecting FHE...' : isProcessing ? 'Creating...' : `Create Escrow — ${unsealedPrice} USDC`}
+              </button>
+            </>
           )}
 
           {/* Step 2: Link to condition resolver (buyer) */}
@@ -901,7 +972,7 @@ function MatchedSection({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <p className="text-emerald-400 font-medium">Settlement Complete</p>
-              <p className="text-xs text-slate-500 mt-1">{unsealedPrice.toString()} USDC settled via Reineira Escrow #{escrowId?.toString()}</p>
+              <p className="text-xs text-slate-500 mt-1">{unsealedPrice.toString()} USDC settled via Privara Escrow #{escrowId?.toString()}</p>
             </div>
           )}
 
@@ -927,9 +998,9 @@ function MatchedSection({
           )}
 
           {/* Errors */}
-          {(escrowError || sdkError) && (
+          {escrowError && (
             <div className="mt-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-              <p className="text-xs text-red-400">{escrowError || sdkError}</p>
+              <p className="text-xs text-red-400">{escrowError}</p>
             </div>
           )}
         </div>

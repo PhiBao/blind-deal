@@ -23,6 +23,9 @@ contract BlindDealResolver {
         blindDeal = IBlindDeal(_blindDeal);
     }
 
+    /// @notice Called by ConfidentialEscrow.create() — no-op, linking is done via linkEscrow.
+    function onConditionSet(uint256, bytes calldata) external {}
+
     /// @notice Link a Reineira escrow to a BlindDeal so the condition resolver
     ///         can check the deal state when redeem is attempted.
     /// @param escrowId The Reineira escrow ID

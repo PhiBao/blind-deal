@@ -1,12 +1,12 @@
 import { useChainId } from 'wagmi';
 
 const CONTRACT_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0x6f7665a7aD14c5DAE617BFec7E80d616DA1Aab7A', // Arbitrum Sepolia
-  11155111: '0x348e8E6Da1278a625B0B13Ff81a55D3AA614f4aD', // Ethereum Sepolia
+  421614: '0xde7b9F01C566A4f8AdcF57CbFC738E5EA2b7Fa0a', // Arbitrum Sepolia
+  11155111: '0x6caDe3a32e7e487e5069041ed7Abc4905Ebb46d1', // Ethereum Sepolia
 };
 
 const RESOLVER_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0x6792E51FBD24f9315282BD5b6c5E713dCc779C69', // Arbitrum Sepolia
+  421614: '0xa4673b39dBc899Eb870964d3e97072b290B9d12D', // Arbitrum Sepolia (v2 — implements onConditionSet)
   11155111: '0x755001a47Ae2543B717CCb8A4e4E9C96c6E2343E', // Ethereum Sepolia
 };
 
@@ -134,6 +134,11 @@ export const BLIND_DEAL_ABI = [
     inputs: [{ name: 'user', type: 'address' }], name: 'getUserDeals',
     outputs: [{ name: '', type: 'uint256[]' }], stateMutability: 'view', type: 'function',
   },
+  {
+    inputs: [{ name: 'dealId', type: 'uint256' }], name: 'isDecryptionReady',
+    outputs: [{ name: 'ready', type: 'bool' }, { name: 'matched', type: 'bool' }],
+    stateMutability: 'view', type: 'function',
+  },
 
   // Write functions
   {
@@ -180,6 +185,13 @@ export const BLIND_DEAL_ABI = [
     name: 'finalizeDeal', outputs: [], stateMutability: 'nonpayable', type: 'function',
   },
   {
+    inputs: [
+      { name: 'dealId', type: 'uint256' },
+      { name: 'matched', type: 'bool' },
+    ],
+    name: 'clientFinalizeDeal', outputs: [], stateMutability: 'nonpayable', type: 'function',
+  },
+  {
     inputs: [{ name: 'dealId', type: 'uint256' }],
     name: 'cancelDeal', outputs: [], stateMutability: 'nonpayable', type: 'function',
   },
@@ -209,3 +221,94 @@ export const DEAL_STATE_COLORS: Record<DealState, string> = {
   [DealState.NoMatch]: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20',
   [DealState.Cancelled]: 'bg-slate-500/10 text-slate-400 ring-1 ring-slate-500/20',
 };
+
+// ── Privara / ReineiraOS Escrow (direct contract calls) ─────────────
+
+const ESCROW_ADDRESSES: Record<number, `0x${string}`> = {
+  421614: '0xC4333F84F5034D8691CB95f068def2e3B6DC60Fa', // Arbitrum Sepolia
+};
+
+const CONF_USDC_ADDRESSES: Record<number, `0x${string}`> = {
+  421614: '0x6b6e6479b8b3237933c3ab9d8be969862d4ed89f', // Arbitrum Sepolia
+};
+
+export function useEscrowAddress(): `0x${string}` | undefined {
+  const chainId = useChainId();
+  return ESCROW_ADDRESSES[chainId];
+}
+
+export function useConfUsdcAddress(): `0x${string}` | undefined {
+  const chainId = useChainId();
+  return CONF_USDC_ADDRESSES[chainId];
+}
+
+const IN_ITEM_TUPLE = {
+  type: 'tuple' as const,
+  components: [
+    { name: 'ctHash', type: 'uint256' as const },
+    { name: 'securityZone', type: 'uint8' as const },
+    { name: 'utype', type: 'uint8' as const },
+    { name: 'signature', type: 'bytes' as const },
+  ],
+};
+
+export const ESCROW_ABI = [
+  {
+    name: 'create', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'encryptedOwner', ...IN_ITEM_TUPLE },
+      { name: 'encryptedAmount', ...IN_ITEM_TUPLE },
+      { name: 'resolver', type: 'address' },
+      { name: 'resolverData', type: 'bytes' },
+    ],
+    outputs: [{ name: 'escrowId', type: 'uint256' }],
+  },
+  {
+    name: 'fund', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'escrowId', type: 'uint256' },
+      { name: 'encryptedPayment', ...IN_ITEM_TUPLE },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'redeem', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'escrowId', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    anonymous: false, type: 'event', name: 'EscrowCreated',
+    inputs: [{ indexed: true, name: 'escrowId', type: 'uint256' }],
+  },
+  {
+    anonymous: false, type: 'event', name: 'EscrowFunded',
+    inputs: [
+      { indexed: true, name: 'escrowId', type: 'uint256' },
+      { indexed: true, name: 'payer', type: 'address' },
+    ],
+  },
+] as const;
+
+export const CONF_USDC_ABI = [
+  {
+    name: 'setOperator', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'operator', type: 'address' },
+      { name: 'expiry', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'isOperator', type: 'function', stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'operator', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const;
+
+/** Convert a human-readable USDC amount to base units (6 decimals). */
+export function usdcUnits(amount: number): bigint {
+  return BigInt(Math.round(amount * 1e6));
+}

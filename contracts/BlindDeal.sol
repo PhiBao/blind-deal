@@ -162,6 +162,23 @@ contract BlindDeal {
         (bool matched, bool decrypted) = FHE.getDecryptResultSafe(d.isMatch);
         require(decrypted, "Match result not ready");
 
+        _finalize(dealId, matched);
+    }
+
+    /// @notice Finalize using client-side CoFHE SDK decryption result.
+    ///         Either party can call with the match result obtained via decryptForView.
+    function clientFinalizeDeal(uint256 dealId, bool matched) external {
+        Deal storage d = deals[dealId];
+        if (d.state != DealState.Open) revert DealNotOpen();
+        require(d.buyerSubmitted && d.sellerSubmitted, "Not resolved yet");
+        if (msg.sender != d.buyer && msg.sender != d.seller) revert NotParticipant();
+
+        _finalize(dealId, matched);
+    }
+
+    function _finalize(uint256 dealId, bool matched) internal {
+        Deal storage d = deals[dealId];
+
         if (matched) {
             d.state = DealState.Matched;
 
@@ -240,5 +257,15 @@ contract BlindDeal {
     /// @notice Returns all deal IDs that an address is involved in
     function getUserDeals(address user) external view returns (uint256[] memory) {
         return userDeals[user];
+    }
+
+    /// @notice Check if the Threshold Network has decrypted the match result
+    /// @return ready Whether decryption has completed
+    /// @return matched Whether the prices matched (only valid if ready == true)
+    function isDecryptionReady(uint256 dealId) external view returns (bool ready, bool matched) {
+        Deal storage d = deals[dealId];
+        if (!d.buyerSubmitted || !d.sellerSubmitted) return (false, false);
+        (bool matchResult, bool decrypted) = FHE.getDecryptResultSafe(d.isMatch);
+        return (decrypted, matchResult);
     }
 }

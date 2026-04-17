@@ -4,8 +4,6 @@
 
 > Two parties negotiate a price without ever revealing their numbers — unless they agree.
 
-Built with [Fhenix CoFHE](https://docs.fhenix.io) (Fully Homomorphic Encryption) for the **Privacy-by-Design dApp Buildathon**.
-
 ---
 
 ## Table of Contents
@@ -13,18 +11,17 @@ Built with [Fhenix CoFHE](https://docs.fhenix.io) (Fully Homomorphic Encryption)
 - [What is BlindDeal?](#what-is-blinddeal)
 - [Why BlindDeal?](#why-blinddeal)
 - [How It Works](#how-it-works)
-- [What's Encrypted vs. What's Public](#whats-encrypted-vs-whats-public)
+- [Privacy Model](#privacy-model)
 - [FHE Operations Deep Dive](#fhe-operations-deep-dive)
+- [Escrow Settlement](#escrow-settlement)
 - [Architecture](#architecture)
-- [Live Deployments](#live-deployments)
+- [Live Demo](#live-demo)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Usage — Hardhat Tasks](#usage--hardhat-tasks)
 - [Tests](#tests)
-- [Supported Networks](#supported-networks)
 - [Roadmap](#roadmap)
 - [Tech Stack](#tech-stack)
-- [License](#license)
 
 ---
 
@@ -32,11 +29,12 @@ Built with [Fhenix CoFHE](https://docs.fhenix.io) (Fully Homomorphic Encryption)
 
 BlindDeal is a **sealed-bid negotiation protocol** where:
 
-1. A **buyer** submits their **maximum acceptable price** (encrypted)
-2. A **seller** submits their **minimum acceptable price** (encrypted)
+1. A **buyer** submits their **maximum acceptable price** (encrypted with FHE)
+2. A **seller** submits their **minimum acceptable price** (encrypted with FHE)
 3. The smart contract computes — entirely on encrypted data — whether the prices overlap
 4. **If they match**: the deal closes at the **midpoint price**, revealed only to both parties
 5. **If they don't match**: **neither price is ever revealed** — zero information leakage
+6. On match, **Privara conditional escrow** settles the deal trustlessly with FHE-encrypted USDC
 
 This is fundamentally impossible on transparent blockchains. On Ethereum, submitting a price means the world sees it. On Fhenix with FHE, the contract computes on ciphertext without ever seeing the plaintext.
 
@@ -73,12 +71,11 @@ This is not possible with commit-reveal schemes (they require eventual reveal), 
 
 | Criterion | BlindDeal |
 |---|---|
-| **Novel** | Fresh angle |
-| **Privacy-native** | Cannot exist without FHE — not a "privacy-bolted-on" project |
-| **Real use case** | Salary negotiation, OTC deals, service pricing |
-| **FHE depth** | Uses 6 different FHE operations (not just encrypt/decrypt) |
-| **Privara integration** | Natural fit for escrow-based settlement |
-| **Demo-friendly** | Two wallets, suspense moment, clear outcome |
+| **Privacy Architecture** | Cannot exist without FHE — prices encrypted end-to-end, conditional disclosure, zero-leakage on no-match |
+| **Innovation & Originality** | First sealed-bid negotiation protocol on FHE — uses 6 FHE operations for encrypted price discovery |
+| **User Experience** | Two-party side-by-side flow, real-time status updates, one-click escrow settlement |
+| **Technical Execution** | Smart contracts + React frontend + Privara escrow + CoFHE SDK — full stack deployed on Arbitrum Sepolia |
+| **Market Potential** | OTC trading, salary negotiation, service pricing, M&A — any bilateral price discovery with information asymmetry |
 
 ---
 
@@ -117,145 +114,157 @@ This is not possible with commit-reveal schemes (they require eventual reveal), 
 │     → encrypted deal price               │
 │                                          │
 │  4. FHE.decrypt(isMatch)                 │
-│     → request Threshold Network decrypt  │
+│     FHE.allowGlobal(isMatch)             │
+│     → enables client-side decryptForView │
 └──────────────┬───────────────────────────┘
-               │  Threshold Network decrypts isMatch
+               │  Client decrypts via CoFHE SDK
                ▼
 ┌──────────────────────────────────────────┐
-│        finalizeDeal()                    │
-│                                          │
-│  reads decrypted isMatch:               │
+│        clientFinalizeDeal()              │
 │                                          │
 │  ✅ Match → DealState: Matched           │
-│     Both parties get access to dealPrice │
-│     (can unseal via SDK)                 │
+│     Both parties unseal the midpoint     │
+│     → Escrow settlement begins           │
 │                                          │
 │  ❌ No Match → DealState: NoMatch        │
 │     Neither price is ever revealed       │
 │     Privacy fully preserved              │
 └──────────────────────────────────────────┘
+               │  On match
+               ▼
+┌──────────────────────────────────────────┐
+│     Privara Escrow Settlement            │
+│                                          │
+│  1. Create escrow (amount = midpoint)    │
+│  2. Link to BlindDealResolver condition  │
+│  3. Fund escrow (FHE-encrypted USDC)     │
+│  4. Seller redeems when condition met    │
+└──────────────────────────────────────────┘
 ```
 
-### Step-by-Step Walkthrough
+### Step-by-Step Example
 
-**Example: Buyer max = 1000, Seller min = 800**
+**Buyer max = 1000, Seller min = 800**
 
 | Step | Action | On-Chain State | Who Sees What |
 |------|--------|----------------|---------------|
-| 1 | Buyer calls `createDeal(seller, "Logo design")` | Deal #0 created, state = Open | Both parties see deal exists |
-| 2 | Buyer encrypts `1000` client-side, calls `submitBuyerPrice(0, enc(1000))` | `buyerMax` = ciphertext, `buyerSubmitted` = true | Nobody sees 1000 — it's FHE-encrypted |
-| 3 | Seller encrypts `800` client-side, calls `submitSellerPrice(0, enc(800))` | `sellerMin` = ciphertext, `sellerSubmitted` = true | Nobody sees 800 — it's FHE-encrypted |
-| 4 | Contract auto-triggers `_resolve()` | Computes `gte(enc(1000), enc(800))` → `enc(true)` | Contract can't see the result — it's encrypted |
-| 5 | Contract computes midpoint | `add(enc(1000), enc(800))` → `enc(1800)` → `div(enc(1800), enc(2))` → `enc(900)` | Still all encrypted |
-| 6 | Threshold Network decrypts `isMatch` | Decrypted result becomes available | Public: "deal matched" (boolean only) |
-| 7 | Anyone calls `finalizeDeal(0)` | State = Matched, ACL grants price access | Buyer and seller can now unseal `900` |
+| 1 | Buyer calls `createDeal(seller, "Logo design")` | Deal created, state = Open | Both see deal exists |
+| 2 | Buyer encrypts `1000`, calls `submitBuyerPrice(enc(1000))` | `buyerMax` = ciphertext | Nobody sees 1000 |
+| 3 | Seller encrypts `800`, calls `submitSellerPrice(enc(800))` | `sellerMin` = ciphertext | Nobody sees 800 |
+| 4 | Contract auto-resolves | `gte(enc(1000), enc(800))` → `enc(true)` | Contract can't see the result |
+| 5 | Midpoint computed | `(enc(1000) + enc(800)) / 2` → `enc(900)` | Still all encrypted |
+| 6 | Frontend decrypts `isMatch` via CoFHE SDK | Boolean available | Public: "matched" |
+| 7 | `clientFinalizeDeal(true)` | State = Matched | Both unseal **900** |
+| 8 | Escrow created, linked, funded | 900 USDC in conditional escrow | Settlement in progress |
+| 9 | Seller redeems escrow | Funds released | Settlement complete |
 
-**If buyer max = 500, seller min = 800**: `gte(enc(500), enc(800))` → `enc(false)`. After decryption, state = NoMatch. The values 500 and 800 are **never revealed to anyone, ever**.
+**If buyer max = 500, seller min = 800**: `gte(enc(500), enc(800))` → `enc(false)`. State = NoMatch. The values 500 and 800 are **never revealed to anyone, ever**.
 
 ---
 
-## What's Encrypted vs. What's Public
+## Privacy Model
 
-This is the core privacy model. Understanding what's hidden and what's visible is critical.
+### Always Public (On-Chain Plaintext)
 
-### Always Public (Plaintext On-Chain)
-
-| Data | Why it's public |
-|------|-----------------|
-| Buyer address | Needed for role enforcement and ACL |
-| Seller address | Needed for role enforcement and ACL |
-| Deal description | User-provided context string |
-| Deal state (`Open`, `Matched`, `NoMatch`, `Cancelled`) | Protocol logic requires state transitions |
-| Whether each party has submitted | Coordination signal (boolean flags) |
-| Whether the deal matched or not | Decrypted `isMatch` boolean — minimal information |
+| Data | Why |
+|------|-----|
+| Buyer & seller addresses | Role enforcement + ACL |
+| Deal description | User-provided context |
+| Deal state (Open / Matched / NoMatch / Cancelled) | Protocol state machine |
+| Whether each party submitted | Coordination signal |
+| Match result (boolean only) | Minimal disclosure |
 
 ### Always Encrypted (FHE Ciphertext)
 
-| Data | Type | When revealed | To whom |
+| Data | Type | Revealed when | To whom |
 |------|------|---------------|---------|
-| Buyer's maximum price | `euint64` | Only on match | Buyer & seller only (as midpoint) |
-| Seller's minimum price | `euint64` | Only on match | Buyer & seller only (as midpoint) |
-| Whether prices overlap | `ebool` | After Threshold Network decrypts | Public (just the boolean) |
-| Deal price (midpoint) | `euint64` | Only on match | Buyer & seller only |
+| Buyer's max price | `euint64` | Only on match | Both parties (as midpoint) |
+| Seller's min price | `euint64` | Only on match | Both parties (as midpoint) |
+| Deal price (midpoint) | `euint64` | Only on match | Both parties |
 
 ### Key Privacy Guarantees
 
-1. **Failed negotiations leak nothing**: If buyer max < seller min, neither the buyer's `1000` nor the seller's `800` is ever revealed. Only the boolean "no match" is disclosed.
-
-2. **Exact prices never revealed**: Even on a successful match, individual prices stay encrypted. Only the midpoint is disclosed to the two parties.
-
-3. **No front-running**: Prices are encrypted before submission. Miners, validators, and MEV bots cannot see them.
-
-4. **Access control enforced on-chain**: The Fhenix ACL system (`FHE.allow()`) ensures only authorized addresses can decrypt specific ciphertexts.
+1. **Failed negotiations leak nothing** — only a boolean "no match" is disclosed
+2. **Individual prices never revealed** — even on match, only the midpoint is disclosed
+3. **No front-running** — prices encrypted client-side before submission
+4. **ACL-enforced access** — only authorized addresses can decrypt specific ciphertexts
 
 ---
 
 ## FHE Operations Deep Dive
 
-The contract uses 6 distinct FHE operations from `@fhenixprotocol/cofhe-contracts/FHE.sol`:
+The contract uses **6 distinct FHE operations** from `@fhenixprotocol/cofhe-contracts/FHE.sol`:
 
-### 1. `FHE.asEuint64(InEuint64)` — Input Encryption
+### 1. `FHE.asEuint64()` — Input Encryption
 
 ```solidity
 d.buyerMax = FHE.asEuint64(encryptedMax);
 ```
+Converts client-side encrypted input (ZK-proven) into an on-chain `euint64` ciphertext handle.
 
-Converts client-side encrypted input (ZK-proven) into an on-chain `euint64` ciphertext handle. The client uses `cofhejs.encrypt([Encryptable.uint64(1000n)])` to produce the `InEuint64` struct.
-
-### 2. `FHE.gte(euint64, euint64)` — Encrypted Comparison
+### 2. `FHE.gte()` — Encrypted Comparison
 
 ```solidity
 ebool match_ = FHE.gte(d.buyerMax, d.sellerMin);
 ```
+Computes `buyerMax >= sellerMin` on encrypted values. Returns an encrypted boolean — the contract **cannot read** the result.
 
-Computes `buyerMax >= sellerMin` on encrypted values using the CoFHE coprocessor. Returns an encrypted boolean — the contract **cannot read** the result. This is the core of the negotiation: determining overlap without seeing either number.
-
-### 3. `FHE.add(euint64, euint64)` — Encrypted Addition
+### 3. `FHE.add()` — Encrypted Addition
 
 ```solidity
 euint64 sum = FHE.add(d.buyerMax, d.sellerMin);
 ```
 
-Adds two encrypted 64-bit values. Used to compute `buyerMax + sellerMin` as the first step of midpoint calculation.
-
-### 4. `FHE.div(euint64, euint64)` — Encrypted Division
+### 4. `FHE.div()` — Encrypted Division
 
 ```solidity
 euint64 midpoint = FHE.div(sum, two);
 ```
+Produces the fair deal price: `(buyerMax + sellerMin) / 2`.
 
-Divides encrypted sum by encrypted `2`. Produces the fair deal price: `(buyerMax + sellerMin) / 2`.
-
-### 5. `FHE.select(ebool, euint64, euint64)` — Encrypted Conditional
+### 5. `FHE.select()` — Encrypted Conditional
 
 ```solidity
 d.dealPrice = FHE.select(match_, midpoint, zero);
 ```
+FHE ternary: if match, return midpoint; else zero. You **cannot branch on encrypted data** — `select` is the pattern.
 
-Encrypted ternary: if `match_` is true (encrypted), return `midpoint`; else return `zero`. This is the FHE equivalent of `if/else` — you **cannot branch on encrypted data** in traditional Solidity, so `select` is the pattern.
-
-### 6. `FHE.decrypt()` + `FHE.getDecryptResultSafe()` — Threshold Decryption
-
-```solidity
-FHE.decrypt(d.isMatch);
-// ... later ...
-(bool matched, bool decrypted) = FHE.getDecryptResultSafe(d.isMatch);
-```
-
-Requests the Threshold Network to decrypt the match boolean. This is a two-step async process:
-1. `decrypt()` submits the request on-chain
-2. The Threshold Network (multi-party computation) decrypts off-chain
-3. `getDecryptResultSafe()` reads the result once available
-
-### Access Control Functions
+### 6. `FHE.decrypt()` + `decryptForView()` — Decryption
 
 ```solidity
-FHE.allowThis(d.buyerMax);    // Contract can use this value in future operations
-FHE.allow(d.dealPrice, d.buyer);  // Buyer can unseal/decrypt this value
-FHE.allowGlobal(d.isMatch);   // Anyone can access match result for finalization
+FHE.decrypt(d.isMatch);        // Request CoFHE decrypt
+FHE.allowGlobal(d.isMatch);   // Enable client-side access
+```
+```typescript
+// Client-side via CoFHE SDK
+const matched = await cofheClient.decryptForView(matchHandle, FheTypes.Bool).execute();
 ```
 
-Every encrypted value has an **Access Control List (ACL)**. Without `allowThis`, the contract can't use its own encrypted variables in subsequent transactions. Without `allow(value, address)`, that address can't decrypt the value via the SDK.
+---
+
+## Escrow Settlement
+
+After a deal matches, BlindDeal integrates with **Privara conditional escrow** (`@reineira-os/sdk`) for trustless USDC settlement:
+
+### Flow
+
+1. **Create Escrow** — Server-side API creates a Privara escrow for the agreed price, linked to `BlindDealResolver`
+2. **Link to Condition** — Escrow is bound to an on-chain condition: the BlindDeal must be in `Matched` state
+3. **Fund Escrow** — Buyer funds with FHE-encrypted Confidential USDC via server-side hot wallet
+4. **Redeem** — Seller redeems funds once the on-chain condition is verified
+
+### Why Server-Side?
+
+The `cofhejs` FHE library (used internally by `@reineira-os/sdk`) requires Node.js native modules that don't run in browser. Escrow create/fund are handled by **Vercel API routes** with a hot wallet. Link and redeem are direct client-side transactions (no FHE needed).
+
+### Contracts
+
+| Contract | Address (Arb Sepolia) | Purpose |
+|----------|----------------------|---------|
+| **BlindDeal** | [`0xde7b...Fa0a`](https://sepolia.arbiscan.io/address/0xde7b9F01C566A4f8AdcF57CbFC738E5EA2b7Fa0a) | Core FHE negotiation (271 lines) |
+| **BlindDealResolver** | [`0xa467...d12D`](https://sepolia.arbiscan.io/address/0xa4673b39dBc899Eb870964d3e97072b290B9d12D) | Condition resolver — true when deal is Matched |
+| **ConfidentialEscrow** | [`0xC433...60Fa`](https://sepolia.arbiscan.io/address/0xC4333F84F5034D8691CB95f068def2e3B6DC60Fa) | Privara escrow (holds FHE-encrypted USDC) |
+| **ConfidentialUSDC** | [`0x6b6e...f89f`](https://sepolia.arbiscan.io/address/0x6b6e6479b8b3237933c3ab9d8be969862d4ed89f) | FHE-wrapped USDC token |
 
 ---
 
@@ -263,71 +272,57 @@ Every encrypted value has an **Access Control List (ACL)**. Without `allowThis`,
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                      Client Layer                        │
+│                    Frontend (React)                       │
 │                                                          │
-│  cofhejs SDK                                             │
-│  ┌──────────────────┐   ┌────────────────────────────┐   │
-│  │ cofhejs.encrypt  │   │ cofhejs.unseal             │   │
-│  │ (plaintext → ZK  │   │ (ciphertext handle →       │   │
-│  │ proven cipher)   │   │  plaintext, with permit)   │   │
-│  └────────┬─────────┘   └─────────────▲──────────────┘   │
-│           │                           │                  │
-└───────────┼───────────────────────────┼──────────────────┘
-            │ InEuint64                 │ euint64 handle
-            ▼                           │
-┌───────────────────────────────────────┼───────────────────┐
-│              BlindDeal.sol            │                   │
-│                                       │                   │
-│  submitBuyerPrice(InEuint64) ─────────┤                   │
-│  submitSellerPrice(InEuint64)         │                   │
-│                                       │                   │
-│  _resolve():                          │                   │
-│    FHE.gte  → ebool                   │                   │
-│    FHE.add  → euint64                 │                   │
-│    FHE.div  → euint64                 │                   │
-│    FHE.select → euint64               │                   │
-│    FHE.decrypt(isMatch) ──────┐       │                   │
-│                               │       │                   │
-│  finalizeDeal():              │       │                   │
-│    getDecryptResultSafe() ◄───┼───────┘                   │
-│    FHE.allow(dealPrice,...) ──┼───► getDealPrice()        │
-│                               │                           │
-└───────────────────────────────┼───────────────────────────┘
-                                │
-                                ▼
-┌───────────────────────────────────────────────────────────┐
-│                    CoFHE Coprocessor                      │
-│                                                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-│  │ TaskManager  │  │ FHEOS Server │  │ Threshold       │  │
-│  │ (validates   │  │ (executes    │  │ Network         │  │
-│  │  FHE ops,    │  │  FHE math    │  │ (MPC-based      │  │
-│  │  manages     │  │  on cipher-  │  │  decryption)    │  │
-│  │  ACL)        │  │  texts)      │  │                 │  │
-│  └──────────────┘  └──────────────┘  └─────────────────┘  │
-│                                                           │
-│  All computation happens on ciphertext — never plaintext  │
-└───────────────────────────────────────────────────────────┘
+│  @cofhe/react          wagmi v2          Vercel API      │
+│  ┌──────────────┐   ┌──────────────┐   ┌─────────────┐  │
+│  │ encrypt()    │   │ writeContract│   │ /api/escrow │  │
+│  │ decrypt()    │   │ readContract │   │ /create     │  │
+│  │ unseal()     │   │              │   │ /fund       │  │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬──────┘  │
+└─────────┼──────────────────┼───────────────────┼─────────┘
+          │                  │                   │
+          ▼                  ▼                   ▼
+┌─────────────────┐  ┌──────────────┐  ┌────────────────┐
+│  CoFHE          │  │ BlindDeal    │  │ Privara SDK    │
+│  Coprocessor    │  │ .sol         │  │ @reineira-os/  │
+│                 │  │              │  │ sdk (Node.js)  │
+│  FHE math on   │  │ 6 FHE ops    │  │                │
+│  ciphertext     │  │ ACL control  │  │ Escrow create  │
+│                 │  │              │  │ Escrow fund    │
+└─────────────────┘  └──────┬───────┘  └───────┬────────┘
+                            │                  │
+                            ▼                  ▼
+                     ┌──────────────────────────────┐
+                     │    Arbitrum Sepolia           │
+                     │                              │
+                     │  BlindDeal                   │
+                     │  BlindDealResolver           │
+                     │  ConfidentialEscrow (Privara) │
+                     │  ConfidentialUSDC            │
+                     └──────────────────────────────┘
 ```
 
 ---
 
-## Live Deployments
+## Live Demo
 
-### Frontend
+### Deployed
 
-| | |
-|---|---|
-| **Supported Chains** | Arbitrum Sepolia, Ethereum Sepolia |
+| Component | URL |
+|-----------|-----|
+| **Frontend** | Vercel deployment (Arbitrum Sepolia + Ethereum Sepolia) |
+| **BlindDeal** | [`0xde7b9F01...Fa0a`](https://sepolia.arbiscan.io/address/0xde7b9F01C566A4f8AdcF57CbFC738E5EA2b7Fa0a) |
+| **Resolver** | [`0xa4673b39...d12D`](https://sepolia.arbiscan.io/address/0xa4673b39dBc899Eb870964d3e97072b290B9d12D) |
 
-### Smart Contracts
+### Verified On-Chain
 
-| Network | Contract Address | Explorer |
-|---------|-----------------|----------|
-| **Arbitrum Sepolia** | `0x6f7665a7aD14c5DAE617BFec7E80d616DA1Aab7A` | [View on Arbiscan](https://sepolia.arbiscan.io/address/0x6f7665a7aD14c5DAE617BFec7E80d616DA1Aab7A) |
-| **Ethereum Sepolia** | `0x348e8E6Da1278a625B0B13Ff81a55D3AA614f4aD` | [View on Etherscan](https://sepolia.etherscan.io/address/0x348e8E6Da1278a625B0B13Ff81a55D3AA614f4aD) |
+The complete escrow lifecycle has been verified on Arbitrum Sepolia:
 
-Deployer: `0x86E95581E41946ED84956433a8a9c836bCbA636c`
+- Escrow create with resolver condition (escrow #61)
+- USDC operator approval + FHE-encrypted fund (escrow #61)
+- Condition-verified redeem (escrow #60)
+- Multiple additional escrows created via API routes (#62, #63)
 
 ---
 
@@ -336,19 +331,33 @@ Deployer: `0x86E95581E41946ED84956433a8a9c836bCbA636c`
 ```
 blinddeal/
 ├── contracts/
-│   └── BlindDeal.sol          # Core negotiation contract (~215 lines)
+│   ├── BlindDeal.sol              # Core FHE negotiation (271 lines)
+│   └── BlindDealResolver.sol      # Privara escrow condition resolver (46 lines)
+├── frontend/
+│   ├── api/escrow/
+│   │   ├── create.ts              # Vercel API: create escrow via Privara SDK
+│   │   └── fund.ts                # Vercel API: fund escrow via Privara SDK
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── CreateDeal.tsx      # Deal creation form
+│   │   │   ├── Dashboard.tsx       # Deal list overview
+│   │   │   ├── DealDetail.tsx      # Full lifecycle: negotiate → settle
+│   │   │   ├── Header.tsx          # Navigation + wallet connection
+│   │   │   └── Toast.tsx           # Notification system
+│   │   ├── config/
+│   │   │   ├── cofhe.tsx           # CoFHE SDK provider setup
+│   │   │   ├── contract.ts         # ABIs, addresses, escrow config
+│   │   │   └── wagmi.ts            # Wagmi + chain configuration
+│   │   └── hooks/
+│   │       └── useEscrow.ts        # Escrow state persistence
+│   ├── dev-api.mjs                 # Local dev API server (port 3002)
+│   └── vite.config.ts              # Custom CoFHE worker plugin
 ├── test/
-│   └── BlindDeal.test.ts      # 22 tests covering all paths
-├── tasks/
-│   ├── deploy-blinddeal.ts    # Deploy to testnet
-│   ├── create-deal.ts         # Create a new deal
-│   ├── submit-price.ts        # Submit encrypted price (buyer or seller)
-│   ├── finalize-deal.ts       # Finalize after Threshold Network decrypts
-│   ├── utils.ts               # Deployment address persistence
-│   └── index.ts               # Task registry
-├── hardhat.config.ts          # Network config (Sepolia, Arb Sepolia)
-├── package.json               # Scripts for all networks
-└── README.md                  # This file
+│   └── BlindDeal.test.ts           # 22 tests (all passing)
+├── tasks/                          # Hardhat tasks (deploy, create, submit, finalize)
+├── deployments/                    # Contract addresses per network
+├── hardhat.config.ts
+└── package.json
 ```
 
 ---
@@ -368,169 +377,104 @@ cd blinddeal
 pnpm install
 ```
 
-### Compile
+### Environment
+
+```bash
+cp .env.example .env
+# Edit .env: set PRIVATE_KEY and RPC URLs
+```
+
+### Compile & Test
 
 ```bash
 pnpm compile
-```
-
-### Test (Local Mock Environment)
-
-```bash
 pnpm test
-```
-
-Expected output:
-
-```
-BlindDeal
-  Deal Creation
-    ✔ Should create a deal with buyer and seller
-    ✔ Should increment deal count
-  Price Submission
-    ✔ Should allow buyer to submit encrypted price
-    ✔ Should allow seller to submit encrypted price
-    ✔ Should reject wrong role submitting
-    ✔ Should reject double submission
-  Deal Resolution — Match
-    ✔ Should match when buyer max >= seller min (1000 >= 800)
-    ✔ Should compute midpoint price correctly
-    ✔ Should match when prices are equal
-  Deal Resolution — No Match
-    ✔ Should not match when buyer max < seller min (500 < 800)
-    ✔ Should revert when reading price of unmatched deal
-  Cancellation
-    ✔ Should allow buyer to cancel before resolution
-    ✔ Should allow seller to cancel before resolution
-    ✔ Should reject cancellation from outsider
-    ✔ Should reject submission on cancelled deal
-
-15 passing
 ```
 
 ### Deploy to Testnet
 
-1. Create `.env`:
-
 ```bash
-PRIVATE_KEY=your_private_key_here
-ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc
-SEPOLIA_RPC_URL=https://ethereum-sepolia.publicnode.com
-```
-
-2. Deploy:
-
-```bash
-# Arbitrum Sepolia (recommended — lower gas)
 pnpm arb-sepolia:deploy-blinddeal
-
-# Ethereum Sepolia
-pnpm eth-sepolia:deploy-blinddeal
+pnpm arb-sepolia:deploy-resolver
 ```
+
+### Run Frontend
+
+```bash
+# Terminal 1: API server (escrow operations via Privara SDK)
+cd frontend && pnpm dev:api
+
+# Terminal 2: Vite dev server (proxies /api → port 3002)
+cd frontend && pnpm dev
+```
+
+Open `http://localhost:3000`
 
 ---
 
 ## Usage — Hardhat Tasks
 
-### Full Negotiation Flow
-
 ```bash
-# 1. Deploy
+# Deploy
 npx hardhat deploy-blinddeal --network arb-sepolia
 
-# 2. Buyer creates a deal
+# Create a deal
 npx hardhat create-deal --network arb-sepolia \
-  --seller 0xSellerAddress... \
-  --description "Logo design project"
+  --seller 0xSellerAddress --description "Logo design"
 
-# 3. Buyer submits their max price (encrypted client-side)
+# Submit encrypted prices
 npx hardhat submit-price --network arb-sepolia \
   --deal 0 --price 1000 --role buyer
 
-# 4. Seller submits their min price (encrypted client-side)
 npx hardhat submit-price --network arb-sepolia \
   --deal 0 --price 800 --role seller
-# → "Both prices submitted — deal is resolving via FHE..."
 
-# 5. Wait for Threshold Network, then finalize
+# Finalize
 npx hardhat finalize-deal --network arb-sepolia --deal 0
-# → "Deal matched! Deal price: 900"
 ```
-
-### Task Reference
-
-| Task | Params | Description |
-|------|--------|-------------|
-| `deploy-blinddeal` | — | Deploy contract, save address |
-| `create-deal` | `--seller <addr>` `--description <text>` `--duration <secs>` | Buyer initiates negotiation |
-| `submit-price` | `--deal <id>` `--price <amount>` `--role buyer\|seller` | Submit encrypted price |
-| `finalize-deal` | `--deal <id>` | Read decrypted match, transition state |
 
 ---
 
 ## Tests
 
-The test suite (`test/BlindDeal.test.ts`) covers 22 scenarios across 6 categories:
+22 tests across 6 categories using mock FHE (`cofhe-hardhat-plugin`):
 
-| Category | Tests | What's verified |
+| Category | Tests | What's Verified |
 |----------|-------|-----------------|
-| **Deal Creation** | 5 | State init, ID increment, per-user tracking, deadline on/off |
-| **Price Submission** | 4 | Encrypted input handling, role enforcement, double-submit prevention |
-| **Match Resolution** | 3 | FHE comparison (match), midpoint arithmetic (900 from 1000/800), equal prices |
-| **No Match** | 2 | FHE comparison (no match), price privacy (revert on getDealPrice) |
-| **Cancellation** | 4 | Buyer cancel, seller cancel, outsider rejection, post-cancel submission rejection |
-| **Deal Expiry** | 4 | Reject submission after deadline, expire by outsider, early expire rejection, no-deadline expire rejection |
-
-Tests use the **mock FHE environment** (`cofhe-hardhat-plugin`) which simulates CoFHE operations locally with plaintext under the hood, allowing verification of FHE logic without a testnet.
-
----
-
-## Supported Networks
-
-| Network | Chain ID | Status | Gas Cost |
-|---------|----------|--------|----------|
-| Hardhat (mock) | 31337 | Development & testing | Simulated |
-| Arbitrum Sepolia | 421614 | ✅ Deployed | Lower (L2) |
-| Ethereum Sepolia | 11155111 | ✅ Deployed | Higher (L1) |
-
-Faucets:
-- [Alchemy Arbitrum Sepolia](https://www.alchemy.com/faucets/arbitrum-sepolia) — 0.1 ETH
-- [Alchemy Sepolia](https://www.alchemy.com/faucets/ethereum-sepolia) — 0.5 ETH
+| **Deal Creation** | 5 | State init, ID increment, per-user tracking, deadline |
+| **Price Submission** | 4 | Encrypted input, role enforcement, double-submit prevention |
+| **Match Resolution** | 3 | FHE comparison, midpoint arithmetic, equal prices |
+| **No Match** | 2 | FHE no-match, price privacy (revert on getDealPrice) |
+| **Cancellation** | 4 | Buyer/seller cancel, outsider rejection, post-cancel rejection |
+| **Deal Expiry** | 4 | Deadline enforcement, early expire rejection |
 
 ---
 
 ## Roadmap
 
-### Wave 1 — Ideation & Smart Contract Core (Mar 21–28) ✅
+### Wave 1 — Smart Contract Core ✅
 
-- [x] Problem definition: confidential negotiation on transparent chains
-- [x] Privacy model design: what's encrypted, what's public, when disclosure happens
-- [x] FHE operation selection: `gte`, `add`, `div`, `select`, `decrypt` — 6 operations
-- [x] `BlindDeal.sol` — working encrypted negotiation contract (~215 lines)
-- [x] ACL-based access control: only matched parties can unseal the deal price
-- [x] Deal deadlines: auto-expiry for unresponsive counterparties
-- [x] Per-user deal tracking: `getUserDeals(address)` for frontend discoverability
-- [x] Hardhat deploy + interaction tasks (deploy, create-deal, submit-price, finalize-deal)
-- [x] 22/22 test coverage (creation, submission, match, no-match, cancel, deadline expiry)
-- [x] Deployed to Arbitrum Sepolia and Ethereum Sepolia
-- [x] Full documentation: architecture, FHE deep dive, privacy model, roadmap
+- [x] `BlindDeal.sol` — FHE negotiation with 6 encrypted operations
+- [x] ACL-based access control, deal deadlines, per-user tracking
+- [x] 22 tests covering all paths
+- [x] Hardhat tasks + deployed to Arbitrum Sepolia & Ethereum Sepolia
 
-### Wave 2 — Frontend + Escrow Settlement (Mar 30–Apr 6) ✅
+### Wave 2 — Frontend + Escrow Settlement ✅
 
-- [x] Vite + React 18 + TypeScript + Tailwind CSS frontend with `@cofhe/react` hooks
-- [x] Wagmi wallet connection + multi-chain routing (Arbitrum Sepolia + Ethereum Sepolia)
-- [x] Full deal lifecycle UI: create, submit encrypted prices, finalize, cancel, expire
-- [x] FHE price unsealing via `cofheClient.decryptForView()` with auto-permits
-- [x] `@reineira-os/sdk` escrow settlement: create → fund (USDC) → redeem
-- [x] End-to-end testnet flow working + deployed on Vercel
+- [x] React frontend with `@cofhe/react` hooks + wagmi wallet connection
+- [x] Full deal lifecycle UI: create → submit encrypted prices → finalize → cancel
+- [x] FHE price unsealing via `cofheClient.decryptForView()`
+- [x] `BlindDealResolver.sol` — condition contract for Privara escrow
+- [x] Privara SDK integration (`@reineira-os/sdk`): create → fund → redeem
+- [x] Server-side API routes for FHE-encrypted escrow operations
+- [x] End-to-end escrow lifecycle verified on Arbitrum Sepolia
 
-### Wave 3 — Telegram Bot + Notifications (Apr 8–Apr 20)
+### Wave 3 — Distribution + Polish
 
-- [ ] Telegram Bot (`grammy` / `telegraf`) — notify participants on deal events
-- [ ] Webhook listener: `PriceSubmitted`, `DealResolving`, `DealResolved` events → Telegram DM
-- [ ] Push notification service: browser push for deal state changes
-- [ ] Deal share links: generate invite URL for seller counterparty
-
+- [ ] Telegram bot for deal notifications + share links
+- [ ] Multi-deal marketplace view
+- [ ] Cross-chain USDC settlement via CCTP
+- [ ] Contract verification on Arbiscan / Etherscan
 ### Wave 4 — Multi-Deal Marketplace (Apr 21–May 10)
 
 - [ ] Multi-deal marketplace: browse open deals, deal history
@@ -544,7 +488,6 @@ Faucets:
 - [ ] On-chain reputation scoring (deals completed, match rate, response time)
 - [ ] Multiple price dimensions (price + timeline + scope)
 - [ ] Cross-chain settlement via CCTP (fund from Ethereum Sepolia, settle on Arb)
-- [ ] Contract verification on Arbiscan / Etherscan
 - [ ] Landing page with protocol explanation
 - [ ] Security review against FHE-specific patterns
 
@@ -554,77 +497,15 @@ Faucets:
 
 | Layer | Technology |
 |-------|-----------|
-| **FHE Smart Contracts** | Solidity 0.8.25, `@fhenixprotocol/cofhe-contracts` |
+| **FHE Contracts** | Solidity 0.8.25, `@fhenixprotocol/cofhe-contracts` |
 | **FHE Coprocessor** | Fhenix CoFHE (TaskManager, FHEOS, Threshold Network) |
-| **Client SDK** | `cofhejs` (encrypt, unseal, permits) |
-| **Dev Framework** | Hardhat 2.22, `cofhe-hardhat-plugin` (mock FHE) |
-| **Testing** | Mocha, Chai, `@nomicfoundation/hardhat-toolbox` |
-| **Settlement** | `@reineira-os/sdk` (escrow create, fund, redeem) |
-| **Frontend** | Vite + React 18, `@cofhe/react`, wagmi, Tailwind CSS |
-| **Networks** | Arbitrum Sepolia, Ethereum Sepolia, Base Sepolia |
+| **Client SDK** | `@cofhe/sdk` + `@cofhe/react` (encrypt, decrypt, permits) |
+| **Escrow** | Privara SDK (`@reineira-os/sdk`) — conditional FHE-encrypted USDC escrow |
+| **Frontend** | Vite 8, React 18, wagmi v2, MUI + Tailwind CSS |
+| **Dev Framework** | Hardhat 2.22, `cofhe-hardhat-plugin` (mock FHE testing) |
+| **Deployment** | Arbitrum Sepolia, Ethereum Sepolia, Vercel |
 
 ---
-
-## License
-
-MIT
-
-### Environment Configuration
-
-The plugin supports different environments:
-
-- `MOCK`: For testing with mocked FHE operations
-- `LOCAL`: For testing with a local CoFHE network (whitelist only)
-- `TESTNET`: For testing and tasks using `arb-sepolia` and `eth-sepolia`
-
-You can check the current environment using:
-
-```typescript
-if (!isPermittedCofheEnvironment(hre, 'MOCK')) {
-	// Skip test or handle accordingly
-}
-```
-
-## Links and Additional Resources
-
-### `cofhejs`
-
-[`cofhejs`](https://github.com/FhenixProtocol/cofhejs) is the JavaScript/TypeScript library for interacting with FHE smart contracts. It provides functions for encryption, decryption, and unsealing FHE values.
-
-#### Key Features
-
-- Encryption of data before sending to FHE contracts
-- Unsealing encrypted values from contracts
-- Managing permits for secure contract interactions
-- Integration with Web3 libraries (ethers.js and viem)
-
-### `cofhe-mock-contracts`
-
-[`cofhe-mock-contracts`](https://github.com/FhenixProtocol/cofhe-mock-contracts) provides mock implementations of CoFHE contracts for testing FHE functionality without the actual coprocessor.
-
-#### Features
-
-- Mock implementations of core CoFHE contracts:
-  - MockTaskManager
-  - MockQueryDecrypter
-  - MockZkVerifier
-  - ACL (Access Control List)
-- Synchronous operation simulation with mock delays
-- On-chain access to unencrypted values for testing
-
-#### Integration with Hardhat and cofhejs
-
-Both `cofhejs` and `cofhe-hardhat-plugin` interact directly with the mock contracts:
-
-- When imported in `hardhat.config.ts`, `cofhe-hardhat-plugin` injects necessary mock contracts into the Hardhat testnet
-- `cofhejs` automatically detects mock contracts and adjusts behavior for test environments
-
-#### Mock Behavior Differences
-
-- **Symbolic Execution**: In mocks, ciphertext hashes point to plaintext values stored on-chain
-- **On-chain Decryption**: Mock decryption adds simulated delays to mimic real behavior
-- **ZK Verification**: Mock verifier handles on-chain storage of encrypted inputs
-- **Off-chain Decryption**: When using `cofhejs.unseal()`, mocks return plaintext values directly from on-chain storage
 
 ## License
 

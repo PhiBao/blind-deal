@@ -1,5 +1,6 @@
 node_modules
 .env
+.env.local
 
 # Hardhat files
 /cache
@@ -15,3 +16,9 @@ node_modules
 
 # Hardhat Ignition default folder for deployments against a local node
 ignition/deployments/chain-31337
+
+# Frontend build output
+frontend/dist
+
+# Vercel
+frontend/.vercel
