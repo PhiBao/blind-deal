@@ -5,8 +5,9 @@ interface IBlindDeal {
     function getDealState(uint256 dealId) external view returns (uint8);
 }
 
-/// @title BlindDealResolver — Condition resolver for Reineira escrow
+/// @title BlindDealResolver — Condition resolver for Privara escrow
 /// @notice Returns true when the linked BlindDeal is finalized as Matched (state == 1).
+///         Expired (state == 4) and other states return false.
 ///         Used as a condition resolver so escrow auto-releases on successful negotiation.
 contract BlindDealResolver {
     IBlindDeal public immutable blindDeal;

@@ -1,13 +1,14 @@
 import { useChainId } from 'wagmi';
 
+// v2 contract addresses (Expired state, createdAt, max deadline, gas-optimized ACL)
 const CONTRACT_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0xde7b9F01C566A4f8AdcF57CbFC738E5EA2b7Fa0a', // Arbitrum Sepolia
-  11155111: '0x6caDe3a32e7e487e5069041ed7Abc4905Ebb46d1', // Ethereum Sepolia
+  421614: '0xCd587f1d57c24cff0D83c1A5f686D2d364114c55', // Arbitrum Sepolia (v2)
+  11155111: '0xBe1F302cbfAbc88494e93E0ca28C44f614cc9EC6', // Ethereum Sepolia (v2)
 };
 
 const RESOLVER_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0xa4673b39dBc899Eb870964d3e97072b290B9d12D', // Arbitrum Sepolia (v2 — implements onConditionSet)
-  11155111: '0x755001a47Ae2543B717CCb8A4e4E9C96c6E2343E', // Ethereum Sepolia
+  421614: '0x0413900b49F140aE7d9F4e2040A8Ec923582A475', // Arbitrum Sepolia (v2)
+  11155111: '0x194365D8081185e09960cdC2B599101Af8f95502', // Ethereum Sepolia (v2)
 };
 
 // Fallback for when no wallet is connected (e.g. read-only views)
@@ -94,6 +95,13 @@ export const BLIND_DEAL_ABI = [
       { indexed: true, name: 'cancelledBy', type: 'address' },
     ],
   },
+  {
+    anonymous: false, type: 'event', name: 'DealExpired',
+    inputs: [
+      { indexed: true, name: 'dealId', type: 'uint256' },
+      { indexed: false, name: 'deadline', type: 'uint256' },
+    ],
+  },
 
   // Read functions
   {
@@ -128,6 +136,10 @@ export const BLIND_DEAL_ABI = [
   },
   {
     inputs: [{ name: 'dealId', type: 'uint256' }], name: 'getDealDeadline',
+    outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function',
+  },
+  {
+    inputs: [{ name: 'dealId', type: 'uint256' }], name: 'getDealCreatedAt',
     outputs: [{ name: '', type: 'uint256' }], stateMutability: 'view', type: 'function',
   },
   {
@@ -206,6 +218,7 @@ export enum DealState {
   Matched = 1,
   NoMatch = 2,
   Cancelled = 3,
+  Expired = 4,
 }
 
 export const DEAL_STATE_LABELS: Record<DealState, string> = {
@@ -213,6 +226,7 @@ export const DEAL_STATE_LABELS: Record<DealState, string> = {
   [DealState.Matched]: 'Matched',
   [DealState.NoMatch]: 'No Match',
   [DealState.Cancelled]: 'Cancelled',
+  [DealState.Expired]: 'Expired',
 };
 
 export const DEAL_STATE_COLORS: Record<DealState, string> = {
@@ -220,6 +234,7 @@ export const DEAL_STATE_COLORS: Record<DealState, string> = {
   [DealState.Matched]: 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20',
   [DealState.NoMatch]: 'bg-red-500/10 text-red-400 ring-1 ring-red-500/20',
   [DealState.Cancelled]: 'bg-slate-500/10 text-slate-400 ring-1 ring-slate-500/20',
+  [DealState.Expired]: 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/20',
 };
 
 // ── Privara / ReineiraOS Escrow (direct contract calls) ─────────────

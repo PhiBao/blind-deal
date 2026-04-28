@@ -6,12 +6,14 @@ import "@fhenixprotocol/cofhe-contracts/FHE.sol";
 /// @title BlindDeal — Confidential P2P Price Negotiation
 /// @notice Two parties submit encrypted prices. If buyer's max >= seller's min,
 ///         the deal closes at the midpoint. If not, neither price is revealed.
+/// @dev Uses Fhenix CoFHE for fully homomorphic encryption operations on-chain.
 contract BlindDeal {
     enum DealState {
         Open,       // Waiting for both parties to submit
         Matched,    // Prices overlapped — deal succeeded
         NoMatch,    // Prices didn't overlap — no deal
-        Cancelled   // One party cancelled before completion
+        Cancelled,  // One party cancelled before completion
+        Expired     // Past deadline without resolution
     }
 
     struct Deal {
@@ -26,18 +28,23 @@ contract BlindDeal {
         bool sellerSubmitted;
         string description;
         uint256 deadline;
+        uint256 createdAt;
     }
 
     uint256 public dealCount;
     mapping(uint256 => Deal) private deals;
     mapping(address => uint256[]) private userDeals;
 
+    // ── Constants ───────────────────────────────────────────────────────
+    uint256 public constant MAX_DEADLINE_DURATION = 365 days;
+
     // ── Events ──────────────────────────────────────────────────────────
-    event DealCreated(uint256 indexed dealId, address indexed buyer, address indexed seller, string description);
+    event DealCreated(uint256 indexed dealId, address indexed buyer, address indexed seller, string description, uint256 deadline);
     event PriceSubmitted(uint256 indexed dealId, address indexed party);
     event DealResolving(uint256 indexed dealId);
     event DealResolved(uint256 indexed dealId, DealState state);
     event DealCancelled(uint256 indexed dealId, address indexed cancelledBy);
+    event DealExpired(uint256 indexed dealId, uint256 deadline);
 
     // ── Errors ──────────────────────────────────────────────────────────
     error NotParticipant();
@@ -46,11 +53,12 @@ contract BlindDeal {
     error DealNotResolved();
     error NotBuyer();
     error NotSeller();
-    error DealExpired();
+    error DealDeadlinePassed();
     error DealNotExpired();
     error InvalidDeadline();
     error SelfDeal();
     error ZeroAddress();
+    error DeadlineTooLong();
 
     // ── Create a new negotiation ────────────────────────────────────────
     /// @param _seller The counterparty's address
@@ -59,6 +67,7 @@ contract BlindDeal {
     function createDeal(address _seller, string calldata _description, uint256 _duration) external returns (uint256 dealId) {
         if (_seller == address(0)) revert ZeroAddress();
         if (_seller == msg.sender) revert SelfDeal();
+        if (_duration > MAX_DEADLINE_DURATION) revert DeadlineTooLong();
 
         dealId = dealCount++;
         Deal storage d = deals[dealId];
@@ -67,11 +76,12 @@ contract BlindDeal {
         d.state = DealState.Open;
         d.description = _description;
         d.deadline = _duration > 0 ? block.timestamp + _duration : 0;
+        d.createdAt = block.timestamp;
 
         userDeals[msg.sender].push(dealId);
         userDeals[_seller].push(dealId);
 
-        emit DealCreated(dealId, msg.sender, _seller, _description);
+        emit DealCreated(dealId, msg.sender, _seller, _description, d.deadline);
     }
 
     // ── Submit encrypted prices ─────────────────────────────────────────
@@ -80,7 +90,7 @@ contract BlindDeal {
     function submitBuyerPrice(uint256 dealId, InEuint64 calldata encryptedMax) external {
         Deal storage d = deals[dealId];
         if (d.state != DealState.Open) revert DealNotOpen();
-        if (d.deadline > 0 && block.timestamp > d.deadline) revert DealExpired();
+        if (d.deadline > 0 && block.timestamp > d.deadline) revert DealDeadlinePassed();
         if (msg.sender != d.buyer) revert NotBuyer();
         if (d.buyerSubmitted) revert AlreadySubmitted();
 
@@ -99,7 +109,7 @@ contract BlindDeal {
     function submitSellerPrice(uint256 dealId, InEuint64 calldata encryptedMin) external {
         Deal storage d = deals[dealId];
         if (d.state != DealState.Open) revert DealNotOpen();
-        if (d.deadline > 0 && block.timestamp > d.deadline) revert DealExpired();
+        if (d.deadline > 0 && block.timestamp > d.deadline) revert DealDeadlinePassed();
         if (msg.sender != d.seller) revert NotSeller();
         if (d.sellerSubmitted) revert AlreadySubmitted();
 
@@ -116,7 +126,8 @@ contract BlindDeal {
 
     // ── Core FHE resolution ─────────────────────────────────────────────
 
-    /// @dev Computes match and midpoint entirely on encrypted data
+    /// @dev Computes match and midpoint entirely on encrypted data.
+    ///      Only allows ACL on values that need to persist or be decrypted.
     function _resolve(uint256 dealId) internal {
         Deal storage d = deals[dealId];
 
@@ -127,15 +138,11 @@ contract BlindDeal {
 
         // 2. Compute midpoint: (buyerMax + sellerMin) / 2
         euint64 sum = FHE.add(d.buyerMax, d.sellerMin);
-        FHE.allowThis(sum);
         euint64 two = FHE.asEuint64(2);
-        FHE.allowThis(two);
         euint64 midpoint = FHE.div(sum, two);
-        FHE.allowThis(midpoint);
 
         // 3. Deal price = midpoint if matched, 0 if not
         euint64 zero = FHE.asEuint64(0);
-        FHE.allowThis(zero);
         d.dealPrice = FHE.select(match_, midpoint, zero);
         FHE.allowThis(d.dealPrice);
 
@@ -146,8 +153,8 @@ contract BlindDeal {
         // Allow global decryption of match result
         FHE.allowGlobal(d.isMatch);
 
-        // Publish match result for on-chain state transition
-        FHE.decrypt(d.isMatch);
+        // Request decryption of match result for on-chain state transition
+        ITaskManager(TASK_MANAGER_ADDRESS).createDecryptTask(uint256(ebool.unwrap(d.isMatch)), address(this));
 
         emit DealResolving(dealId);
     }
@@ -209,14 +216,14 @@ contract BlindDeal {
 
     // ── Expire ──────────────────────────────────────────────────────────
 
-    /// @notice Anyone can expire a deal past its deadline (returns to clean state)
+    /// @notice Anyone can expire a deal past its deadline
     function expireDeal(uint256 dealId) external {
         Deal storage d = deals[dealId];
         if (d.state != DealState.Open) revert DealNotOpen();
         if (d.deadline == 0 || block.timestamp <= d.deadline) revert DealNotExpired();
 
-        d.state = DealState.Cancelled;
-        emit DealCancelled(dealId, msg.sender);
+        d.state = DealState.Expired;
+        emit DealExpired(dealId, d.deadline);
     }
 
     // ── View functions ──────────────────────────────────────────────────
@@ -252,6 +259,11 @@ contract BlindDeal {
     /// @notice Returns the deal deadline (0 = no deadline)
     function getDealDeadline(uint256 dealId) external view returns (uint256) {
         return deals[dealId].deadline;
+    }
+
+    /// @notice Returns the deal creation timestamp
+    function getDealCreatedAt(uint256 dealId) external view returns (uint256) {
+        return deals[dealId].createdAt;
     }
 
     /// @notice Returns all deal IDs that an address is involved in

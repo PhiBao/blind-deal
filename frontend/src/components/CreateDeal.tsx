@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { parseEventLogs } from 'viem';
+import { parseEventLogs, isAddress } from 'viem';
 import { BLIND_DEAL_ABI, useBlindDealAddress } from '../config/contract';
 
 interface CreateDealProps {
@@ -8,7 +8,7 @@ interface CreateDealProps {
 }
 
 export function CreateDeal({ onCreated }: CreateDealProps) {
-  const { isConnected } = useAccount();
+  const { isConnected, address } = useAccount();
   const contractAddress = useBlindDealAddress();
   const [seller, setSeller] = useState('');
   const [description, setDescription] = useState('');
@@ -29,9 +29,21 @@ export function CreateDeal({ onCreated }: CreateDealProps) {
     onCreated(0n);
   }, [isSuccess, receipt]);
 
+  const [validationError, setValidationError] = useState<string | null>(null);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setValidationError(null);
+
     if (!seller || !description) return;
+    if (!isAddress(seller)) {
+      setValidationError('Please enter a valid Ethereum address (0x...)');
+      return;
+    }
+    if (seller.toLowerCase() === address?.toLowerCase()) {
+      setValidationError('You cannot create a deal with yourself as the seller');
+      return;
+    }
 
     writeContract({
       address: contractAddress,
@@ -116,6 +128,12 @@ export function CreateDeal({ onCreated }: CreateDealProps) {
             min="0"
           />
         </div>
+
+        {validationError && (
+          <div className="p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <p className="text-sm text-red-400">{validationError}</p>
+          </div>
+        )}
 
         <button
           type="submit"

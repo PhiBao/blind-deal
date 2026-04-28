@@ -1,8 +1,7 @@
 import { task } from 'hardhat/config'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 import { BlindDeal } from '../typechain-types'
-import { cofhejs, Encryptable, EncryptStep } from 'cofhejs/node'
-import { cofhejs_initializeWithHardhatSigner } from 'cofhe-hardhat-plugin'
+import { Encryptable } from '@cofhe/sdk'
 import { getDeployment } from './utils'
 
 task('submit-price', 'Submit an encrypted price to a deal')
@@ -20,32 +19,23 @@ task('submit-price', 'Submit an encrypted price to a deal')
 
 		const [signer] = await ethers.getSigners()
 		console.log(`Submitting ${taskArgs.role} price as: ${signer.address}`)
-		await cofhejs_initializeWithHardhatSigner(signer)
+
+		const cofheClient = await hre.cofhe.createClientWithBatteries(signer)
 
 		const BlindDeal = await ethers.getContractFactory('BlindDeal')
 		const blindDeal = BlindDeal.attach(address) as unknown as BlindDeal
 
-		const logState = (state: EncryptStep) => {
-			console.log(`Encrypt state: ${state}`)
-		}
-
-		const encryptedValue = await cofhejs.encrypt(
-			[Encryptable.uint64(BigInt(taskArgs.price))] as const,
-			logState,
-		)
-
-		if (!encryptedValue?.data) {
-			console.error('Encryption failed')
-			return
-		}
+		const [encryptedValue] = await cofheClient
+			.encryptInputs([Encryptable.uint64(BigInt(taskArgs.price))])
+			.execute()
 
 		const dealId = BigInt(taskArgs.deal)
 		let tx
 
 		if (taskArgs.role === 'buyer') {
-			tx = await blindDeal.submitBuyerPrice(dealId, encryptedValue.data[0])
+			tx = await blindDeal.submitBuyerPrice(dealId, encryptedValue)
 		} else if (taskArgs.role === 'seller') {
-			tx = await blindDeal.submitSellerPrice(dealId, encryptedValue.data[0])
+			tx = await blindDeal.submitSellerPrice(dealId, encryptedValue)
 		} else {
 			console.error('Role must be "buyer" or "seller"')
 			return

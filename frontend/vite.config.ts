@@ -7,12 +7,22 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 
-// Resolve tfhe from cofhejs's nested node_modules (pnpm isolates it there)
-const tfhePath = path.dirname(
-  require.resolve('tfhe/package.json', {
-    paths: [path.resolve(__dirname, '../node_modules/cofhejs')],
-  }),
-);
+// Resolve tfhe from @cofhe/sdk's nested node_modules (pnpm isolates it there)
+let tfhePath: string;
+try {
+  tfhePath = path.dirname(
+    require.resolve('tfhe/package.json', {
+      paths: [path.resolve(__dirname, '../node_modules/@cofhe/sdk')],
+    }),
+  );
+} catch {
+  // Fallback to workspace root node_modules
+  tfhePath = path.dirname(
+    require.resolve('tfhe/package.json', {
+      paths: [path.resolve(__dirname, '../node_modules')],
+    }),
+  );
+}
 
 // Resolve @cofhe/sdk dist directory for worker file serving
 const cofheSdkDistPath = path.dirname(
@@ -55,7 +65,6 @@ export default defineConfig({
   plugins: [cofheWorkerPlugin(), react(), wasm()],
   resolve: {
     alias: {
-      'cofhejs/node': 'cofhejs/web',
       tfhe: tfhePath,
       // @cofhe/react imports @cofhe/abi but pnpm hoists it to the workspace root
       '@cofhe/abi': path.resolve(__dirname, '..', 'node_modules/@cofhe/abi'),
@@ -80,11 +89,11 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['tfhe'],
     include: [
-      'cofhejs/web',
-      'cofhejs > tweetnacl',
-      'cofhejs > zustand',
-      'cofhejs > immer',
-      'cofhejs > zod',
+      '@cofhe/sdk/web',
+      '@cofhe/sdk > tweetnacl',
+      '@cofhe/sdk > zustand',
+      '@cofhe/sdk > immer',
+      '@cofhe/sdk > zod',
     ],
   },
   assetsInclude: ['**/*.wasm'],

@@ -113,7 +113,7 @@ This is not possible with commit-reveal schemes (they require eventual reveal), 
 │  3. FHE.select(match, midpoint, 0)       │
 │     → encrypted deal price               │
 │                                          │
-│  4. FHE.decrypt(isMatch)                 │
+│  4. ITaskManager.createDecryptTask(isMatch)
 │     FHE.allowGlobal(isMatch)             │
 │     → enables client-side decryptForView │
 └──────────────┬───────────────────────────┘
@@ -170,7 +170,7 @@ This is not possible with commit-reveal schemes (they require eventual reveal), 
 |------|-----|
 | Buyer & seller addresses | Role enforcement + ACL |
 | Deal description | User-provided context |
-| Deal state (Open / Matched / NoMatch / Cancelled) | Protocol state machine |
+| Deal state (Open / Matched / NoMatch / Cancelled / Expired) | Protocol state machine |
 | Whether each party submitted | Coordination signal |
 | Match result (boolean only) | Minimal disclosure |
 
@@ -229,14 +229,15 @@ d.dealPrice = FHE.select(match_, midpoint, zero);
 ```
 FHE ternary: if match, return midpoint; else zero. You **cannot branch on encrypted data** — `select` is the pattern.
 
-### 6. `FHE.decrypt()` + `decryptForView()` — Decryption
+### 6. `ITaskManager.createDecryptTask()` + `decryptForView()` — Decryption
 
 ```solidity
-FHE.decrypt(d.isMatch);        // Request CoFHE decrypt
+// Request Threshold Network decryption (replaces FHE.decrypt in v0.5.x)
+ITaskManager(TASK_MANAGER_ADDRESS).createDecryptTask(uint256(ebool.unwrap(d.isMatch)), address(this));
 FHE.allowGlobal(d.isMatch);   // Enable client-side access
 ```
 ```typescript
-// Client-side via CoFHE SDK
+// Client-side via CoFHE SDK v0.5.x
 const matched = await cofheClient.decryptForView(matchHandle, FheTypes.Bool).execute();
 ```
 
@@ -261,8 +262,8 @@ The `cofhejs` FHE library (used internally by `@reineira-os/sdk`) requires Node.
 
 | Contract | Address (Arb Sepolia) | Purpose |
 |----------|----------------------|---------|
-| **BlindDeal** | [`0xde7b...Fa0a`](https://sepolia.arbiscan.io/address/0xde7b9F01C566A4f8AdcF57CbFC738E5EA2b7Fa0a) | Core FHE negotiation (271 lines) |
-| **BlindDealResolver** | [`0xa467...d12D`](https://sepolia.arbiscan.io/address/0xa4673b39dBc899Eb870964d3e97072b290B9d12D) | Condition resolver — true when deal is Matched |
+| **BlindDeal** | [`0xCd58...4c55`](https://sepolia.arbiscan.io/address/0xCd587f1d57c24cff0D83c1A5f686D2d364114c55) | Core FHE negotiation v2 (Expired state, createdAt) |
+| **BlindDealResolver** | [`0x0413...A475`](https://sepolia.arbiscan.io/address/0x0413900b49F140aE7d9F4e2040A8Ec923582A475) | Condition resolver — true when deal is Matched |
 | **ConfidentialEscrow** | [`0xC433...60Fa`](https://sepolia.arbiscan.io/address/0xC4333F84F5034D8691CB95f068def2e3B6DC60Fa) | Privara escrow (holds FHE-encrypted USDC) |
 | **ConfidentialUSDC** | [`0x6b6e...f89f`](https://sepolia.arbiscan.io/address/0x6b6e6479b8b3237933c3ab9d8be969862d4ed89f) | FHE-wrapped USDC token |
 
@@ -312,8 +313,8 @@ The `cofhejs` FHE library (used internally by `@reineira-os/sdk`) requires Node.
 | Component | URL |
 |-----------|-----|
 | **Frontend** | Vercel deployment (Arbitrum Sepolia + Ethereum Sepolia) |
-| **BlindDeal** | [`0xde7b9F01...Fa0a`](https://sepolia.arbiscan.io/address/0xde7b9F01C566A4f8AdcF57CbFC738E5EA2b7Fa0a) |
-| **Resolver** | [`0xa4673b39...d12D`](https://sepolia.arbiscan.io/address/0xa4673b39dBc899Eb870964d3e97072b290B9d12D) |
+| **BlindDeal** | [`0xCd58...4c55`](https://sepolia.arbiscan.io/address/0xCd587f1d57c24cff0D83c1A5f686D2d364114c55) |
+| **Resolver** | [`0x0413...A475`](https://sepolia.arbiscan.io/address/0x0413900b49F140aE7d9F4e2040A8Ec923582A475) |
 
 ### Verified On-Chain
 
@@ -331,8 +332,8 @@ The complete escrow lifecycle has been verified on Arbitrum Sepolia:
 ```
 blinddeal/
 ├── contracts/
-│   ├── BlindDeal.sol              # Core FHE negotiation (271 lines)
-│   └── BlindDealResolver.sol      # Privara escrow condition resolver (46 lines)
+│   ├── BlindDeal.sol              # Core FHE negotiation
+│   └── BlindDealResolver.sol      # Privara escrow condition resolver
 ├── frontend/
 │   ├── api/escrow/
 │   │   ├── create.ts              # Vercel API: create escrow via Privara SDK
@@ -340,21 +341,26 @@ blinddeal/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── CreateDeal.tsx      # Deal creation form
-│   │   │   ├── Dashboard.tsx       # Deal list overview
-│   │   │   ├── DealDetail.tsx      # Full lifecycle: negotiate → settle
+│   │   │   ├── Dashboard.tsx       # My Deals + Marketplace tabs
+│   │   │   ├── DealDetail.tsx      # Full lifecycle: negotiate → settle (CCTP)
 │   │   │   ├── Header.tsx          # Navigation + wallet connection
 │   │   │   └── Toast.tsx           # Notification system
 │   │   ├── config/
 │   │   │   ├── cofhe.tsx           # CoFHE SDK provider setup
 │   │   │   ├── contract.ts         # ABIs, addresses, escrow config
 │   │   │   └── wagmi.ts            # Wagmi + chain configuration
-│   │   └── hooks/
-│   │       └── useEscrow.ts        # Escrow state persistence
+│   │   ├── hooks/
+│   │   │   └── useEscrow.ts        # Escrow state persistence
+│   │   └── utils/
+│   │       └── cctp.ts             # Circle CCTP v2 bridge logic
 │   ├── dev-api.mjs                 # Local dev API server (port 3002)
 │   └── vite.config.ts              # Custom CoFHE worker plugin
+├── telegram-bot/
+│   ├── index.ts                    # Telegram bot: notifications + share links
+│   └── package.json                # Bot dependencies
 ├── test/
-│   └── BlindDeal.test.ts           # 22 tests (all passing)
-├── tasks/                          # Hardhat tasks (deploy, create, submit, finalize)
+│   └── BlindDeal.test.ts           # 25 tests (all passing)
+├── tasks/                          # Hardhat tasks (deploy, create, submit, finalize, verify)
 ├── deployments/                    # Contract addresses per network
 ├── hardhat.config.ts
 └── package.json
@@ -437,7 +443,7 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 
 ## Tests
 
-22 tests across 6 categories using mock FHE (`cofhe-hardhat-plugin`):
+27 tests across 6 categories using mock FHE (`@cofhe/hardhat-plugin`):
 
 | Category | Tests | What's Verified |
 |----------|-------|-----------------|
@@ -456,7 +462,7 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 
 - [x] `BlindDeal.sol` — FHE negotiation with 6 encrypted operations
 - [x] ACL-based access control, deal deadlines, per-user tracking
-- [x] 22 tests covering all paths
+- [x] 27 tests covering all paths
 - [x] Hardhat tasks + deployed to Arbitrum Sepolia & Ethereum Sepolia
 
 ### Wave 2 — Frontend + Escrow Settlement ✅
@@ -471,10 +477,16 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 
 ### Wave 3 — Distribution + Polish
 
-- [ ] Telegram bot for deal notifications + share links
-- [ ] Multi-deal marketplace view
-- [ ] Cross-chain USDC settlement via CCTP
-- [ ] Contract verification on Arbiscan / Etherscan
+- [x] **FHE Engine Upgrade** — Migrated from `cofhejs` / `cofhe-hardhat-plugin` v0.3.x to `@cofhe/sdk` / `@cofhe/hardhat-plugin` v0.5.1
+- [x] **Smart contract v2** — Added `Expired` state, `createdAt` timestamp, max deadline cap (365 days), `DealExpired` event, gas optimization
+- [x] **Telegram bot** for deal notifications + share links (`/status`, `/share`, `/subscribe`, `/unsubscribe`)
+- [x] **Multi-deal marketplace view** — Browse all open deals alongside "My Deals"
+- [x] **Deal filters** — All / Open / Closed tabs on "My Deals"
+- [x] **Live countdown timer** — Shows remaining time on open deals
+- [x] **Share improvements** — Copy link + Telegram share button on deal detail
+- [x] **Address validation** — CreateDeal form validates seller address format and self-deal prevention
+- [x] **Cross-chain USDC settlement via CCTP** — Bridge USDC from Ethereum Sepolia → Arbitrum Sepolia, then fund escrow
+- [x] **Contract verification tasks** — `verify-blinddeal` and `verify-resolver` Hardhat tasks
 ### Wave 4 — Multi-Deal Marketplace (Apr 21–May 10)
 
 - [ ] Multi-deal marketplace: browse open deals, deal history
@@ -497,12 +509,14 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 
 | Layer | Technology |
 |-------|-----------|
-| **FHE Contracts** | Solidity 0.8.25, `@fhenixprotocol/cofhe-contracts` |
+| **FHE Contracts** | Solidity 0.8.25, `@fhenixprotocol/cofhe-contracts` v0.1.3 |
 | **FHE Coprocessor** | Fhenix CoFHE (TaskManager, FHEOS, Threshold Network) |
-| **Client SDK** | `@cofhe/sdk` + `@cofhe/react` (encrypt, decrypt, permits) |
+| **Client SDK** | `@cofhe/sdk` v0.5.1 + `@cofhe/react` v0.5.1 (encrypt, decrypt, permits) |
 | **Escrow** | Privara SDK (`@reineira-os/sdk`) — conditional FHE-encrypted USDC escrow |
 | **Frontend** | Vite 8, React 18, wagmi v2, MUI + Tailwind CSS |
-| **Dev Framework** | Hardhat 2.22, `cofhe-hardhat-plugin` (mock FHE testing) |
+| **Dev Framework** | Hardhat 2.22, `@cofhe/hardhat-plugin` v0.5.1 (mock FHE testing) |
+| **Cross-chain** | Circle CCTP v2 (Ethereum Sepolia → Arbitrum Sepolia) |
+| **Distribution** | Telegram bot (deal notifications, share links, status) |
 | **Deployment** | Arbitrum Sepolia, Ethereum Sepolia, Vercel |
 
 ---

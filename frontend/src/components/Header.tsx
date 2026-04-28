@@ -29,7 +29,7 @@ export function Header({ onNavigate, currentPage }: HeaderProps) {
   const currentChain = CHAINS.find((c) => c.id === chainId) ?? CHAINS[0];
 
   // Deduplicate connectors: prefer EIP-6963 (has icon/name) over generic injected fallback
-  const uniqueConnectors = connectors.reduce<typeof connectors>((acc, c) => {
+  const uniqueConnectors = connectors.reduce<typeof connectors[number][]>((acc, c) => {
     if (c.type === 'injected' && !c.icon && acc.some((a) => a.id === c.id)) return acc;
     if (!acc.some((a) => a.id === c.id && a.type === c.type)) acc.push(c);
     return acc;

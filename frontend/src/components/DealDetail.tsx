@@ -10,6 +10,8 @@ import {
 } from 'wagmi';
 import { useCofheEncrypt, useCofheClient, useCofheConnection } from '@cofhe/react';
 import { Encryptable, FheTypes } from '@cofhe/sdk';
+import { createWalletClient, custom, type Account, type Chain, type Transport } from 'viem';
+import { sepolia, arbitrumSepolia } from 'viem/chains';
 import {
   BLIND_DEAL_ABI,
   useBlindDealAddress,
@@ -22,6 +24,7 @@ import {
   DEAL_STATE_COLORS,
 } from '../config/contract';
 import { getStoredEscrowId, storeEscrowId } from '../hooks/useEscrow';
+import { bridgeUSDCViaCCTP, receiveCCTPMessageOnArbitrum } from '../utils/cctp';
 import type { ToastType } from './Toast';
 
 // ── Toast context (provided by App) ─────────────────────────────────
@@ -40,6 +43,30 @@ export const DealToastContext = createContext<ToastCtx>({
 interface DealDetailProps {
   dealId: bigint;
   onBack: () => void;
+}
+
+function CountdownTimer({ deadline }: { deadline: bigint }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const remaining = Number(deadline) * 1000 - now;
+  if (remaining <= 0) return <span className="text-red-400">Expired</span>;
+
+  const days = Math.floor(remaining / 86400000);
+  const hours = Math.floor((remaining % 86400000) / 3600000);
+  const minutes = Math.floor((remaining % 3600000) / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || hours > 0 || days > 0) parts.push(`${minutes}m`);
+  parts.push(`${seconds}s`);
+
+  return <span className="text-amber-400 font-mono text-[11px]">{parts.join(' ')}</span>;
 }
 
 export function DealDetail({ dealId, onBack }: DealDetailProps) {
@@ -116,9 +143,13 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
             <div className="flex items-center gap-3">
               <CopyDealLink dealId={dealId} chainId={chainId} />
               {deadline > 0n ? (
-                <span className={isExpired ? 'text-red-400' : ''}>
-                  {isExpired ? 'Expired' : `Due ${new Date(Number(deadline) * 1000).toLocaleDateString()}`}
-                </span>
+                state === DealState.Open && !isExpired ? (
+                  <CountdownTimer deadline={deadline} />
+                ) : (
+                  <span className={isExpired ? 'text-red-400' : ''}>
+                    {isExpired ? 'Expired' : `Due ${new Date(Number(deadline) * 1000).toLocaleDateString()}`}
+                  </span>
+                )
               ) : (
                 <span>No deadline</span>
               )}
@@ -246,10 +277,22 @@ function CopyDealLink({ dealId, chainId }: { dealId: bigint; chainId: number }) 
       setTimeout(() => setCopied(false), 2000);
     });
   };
+  const shareTelegram = () => {
+    const url = `${window.location.origin}?deal=${dealId}&chain=${chainId}`;
+    const text = encodeURIComponent(`Join my BlindDeal negotiation: ${url}`);
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${text}`, '_blank');
+  };
   return (
-    <button onClick={handleCopy} className="text-slate-500 hover:text-indigo-400 transition-colors">
-      {copied ? <span className="text-emerald-400 text-[11px]">Copied!</span> : <span className="text-[11px]">Share ↗</span>}
-    </button>
+    <div className="flex items-center gap-2">
+      <button onClick={handleCopy} className="text-slate-500 hover:text-indigo-400 transition-colors">
+        {copied ? <span className="text-emerald-400 text-[11px]">Copied!</span> : <span className="text-[11px]">Copy Link ↗</span>}
+      </button>
+      <button onClick={shareTelegram} className="text-slate-500 hover:text-sky-400 transition-colors" title="Share on Telegram">
+        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -298,6 +341,8 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
   const { toast, update } = useContext(DealToastContext);
   const [price, setPrice] = useState('');
   const { encryptInputsAsync, isEncrypting } = useCofheEncrypt();
+  const cofheConnection = useCofheConnection();
+  const { address: userAddress } = useAccount();
   const { writeContract, data: txHash, isPending, error } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
@@ -308,10 +353,43 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!price) return;
+    if (!cofheConnection.connected) {
+      toast('error', 'FHE client not connected. Please wait for the zk-proof worker to load and try again.');
+      return;
+    }
+    if (!userAddress) {
+      toast('error', 'Wallet not connected. Please connect your wallet and try again.');
+      return;
+    }
+    if (cofheConnection.account?.toLowerCase() !== userAddress.toLowerCase()) {
+      console.error('[BlindDeal] Account mismatch:', {
+        cofheAccount: cofheConnection.account,
+        walletAddress: userAddress,
+      });
+      toast('error', 'Wallet account mismatch. Please disconnect and reconnect your wallet, then try again.');
+      return;
+    }
 
     const tid = toast('loading', 'Encrypting price with FHE...');
     try {
+      console.log('[BlindDeal] Encrypting for:', {
+        account: userAddress,
+        chainId: cofheConnection.chainId,
+        contract: contractAddress,
+        dealId: dealId.toString(),
+        price,
+        isBuyer,
+      });
       const encrypted = await encryptInputsAsync([Encryptable.uint64(BigInt(price))] as const);
+      if (!encrypted || !encrypted[0]?.signature) {
+        throw new Error('FHE encryption returned invalid data. Please refresh and try again.');
+      }
+      console.log('[BlindDeal] Encrypted result:', {
+        ctHash: encrypted[0].ctHash.toString(16),
+        securityZone: encrypted[0].securityZone,
+        utype: encrypted[0].utype,
+        signatureLength: encrypted[0].signature.length,
+      });
       update(tid, 'loading', 'Submitting encrypted price...');
 
       const input = {
@@ -617,6 +695,8 @@ function MatchedSection({
   const [escrowError, setEscrowError] = useState<string | null>(null);
   const [fundMode, setFundMode] = useState<'local' | 'cross-chain'>('local');
   const [cctpProgress, setCctpProgress] = useState<string | null>(null);
+  const [cctpMessageBytes, setCctpMessageBytes] = useState<`0x${string}` | null>(null);
+  const [cctpAttestation, setCctpAttestation] = useState<string | null>(null);
 
   // Check if escrow is linked to resolver
   const { data: isRegistered } = useReadContract({
@@ -636,23 +716,37 @@ function MatchedSection({
     query: { enabled: escrowId != null && !!resolverAddress && isRegistered === true, refetchInterval: 10000 },
   });
 
-  // Check escrow funding on load via EscrowFunded events
+  // Poll escrow funding status via EscrowFunded events (every 10s)
   useEffect(() => {
     if (!publicClient || escrowId == null || !escrowAddress) return;
-    publicClient.getContractEvents({
-      address: escrowAddress,
-      abi: ESCROW_ABI,
-      eventName: 'EscrowFunded',
-      args: { escrowId },
-      fromBlock: 0n,
-    }).then((events) => {
-      if (events.length > 0) setEscrowStatus('funded');
-      else if (isRegistered) setEscrowStatus('linked');
-      else setEscrowStatus('created');
-    }).catch(() => {
-      if (isRegistered) setEscrowStatus('linked');
-      else setEscrowStatus('created');
-    });
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const events = await publicClient.getContractEvents({
+          address: escrowAddress,
+          abi: ESCROW_ABI,
+          eventName: 'EscrowFunded',
+          args: { escrowId },
+          fromBlock: 0n,
+        });
+        if (cancelled) return;
+        if (events.length > 0) {
+          setEscrowStatus('funded');
+        } else if (isRegistered === true) {
+          setEscrowStatus('linked');
+        } else if (isRegistered === false) {
+          setEscrowStatus('created');
+        }
+        // If isRegistered is undefined, don't change status (still loading)
+      } catch {
+        // On error, don't downgrade status
+      }
+    };
+
+    check();
+    const interval = setInterval(check, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [publicClient, escrowId, escrowAddress, isRegistered]);
 
   // Link escrow to resolver tx
@@ -723,6 +817,7 @@ function MatchedSection({
 
   const handleLinkEscrow = () => {
     if (escrowId == null || !resolverAddress) return;
+    setIsProcessing(true);
     setEscrowStatus('linking');
     toast('loading', 'Linking escrow to deal condition...');
     writeLinkEscrow({
@@ -739,8 +834,47 @@ function MatchedSection({
     setEscrowError(null);
 
     if (fundMode === 'cross-chain') {
-      setEscrowError('Cross-chain funding is not available yet. Use local fund.');
-      setIsProcessing(false);
+      const tid = toast('loading', 'Starting CCTP cross-chain bridge...');
+      try {
+        const ethereum = (window as any).ethereum;
+        if (!ethereum) throw new Error('No wallet detected');
+
+        // Switch to Ethereum Sepolia
+        await ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0xaa36a7' }], // 11155111
+        });
+
+        const ethWalletClient = createWalletClient({
+          account: userAddress!,
+          chain: sepolia,
+          transport: custom(ethereum),
+        });
+
+        const arbPublicClient = publicClient; // Current public client should be on Arb Sepolia
+        if (!arbPublicClient) throw new Error('Arbitrum public client not available');
+
+        setCctpProgress('Approving USDC on Ethereum Sepolia...');
+        const { messageBytes, attestation } = await bridgeUSDCViaCCTP({
+          amount: BigInt(unsealedPrice) * 10n ** 6n, // USDC 6 decimals
+          recipient: userAddress!,
+          ethWalletClient,
+          arbPublicClient,
+          onProgress: (p) => setCctpProgress(p.message ?? null),
+        });
+
+        setCctpMessageBytes(messageBytes);
+        setCctpAttestation(attestation);
+        setCctpProgress('USDC bridged! Switch to Arbitrum Sepolia and click "Complete Mint".');
+        update(tid, 'success', 'CCTP burn complete. Complete mint on Arbitrum.');
+        setIsProcessing(false);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'CCTP bridge failed';
+        setEscrowError(msg);
+        setCctpProgress(null);
+        update(tid, 'error', msg);
+        setIsProcessing(false);
+      }
       return;
     }
 
@@ -771,8 +905,51 @@ function MatchedSection({
     }
   };
 
+  const handleCompleteCCTPMint = async () => {
+    if (!cctpMessageBytes || !cctpAttestation) return;
+    setIsProcessing(true);
+    const tid = toast('loading', 'Minting USDC on Arbitrum Sepolia...');
+    try {
+      const ethereum = (window as any).ethereum;
+      if (!ethereum) throw new Error('No wallet detected');
+
+      // Ensure on Arbitrum Sepolia
+      await ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x66eee' }], // 421614
+      });
+
+      const arbWalletClient = createWalletClient({
+        account: userAddress!,
+        chain: arbitrumSepolia,
+        transport: custom(ethereum),
+      });
+
+      await receiveCCTPMessageOnArbitrum({
+        messageBytes: cctpMessageBytes,
+        attestation: cctpAttestation,
+        arbWalletClient,
+      });
+
+      setCctpProgress('Mint complete! Now fund escrow locally with minted USDC.');
+      setCctpMessageBytes(null);
+      setCctpAttestation(null);
+      update(tid, 'success', 'CCTP mint complete on Arbitrum');
+      setIsProcessing(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'CCTP mint failed';
+      setEscrowError(msg);
+      update(tid, 'error', msg);
+      setIsProcessing(false);
+    }
+  };
+
   const handleRedeemEscrow = async () => {
     if (escrowId == null || !escrowAddress) return;
+    if (conditionMet !== true) {
+      setEscrowError('Deal condition not yet verified on-chain. Please wait.');
+      return;
+    }
     setIsProcessing(true);
     setEscrowError(null);
     toast('loading', 'Confirm redemption in wallet...');
@@ -865,10 +1042,10 @@ function MatchedSection({
           {escrowId != null && escrowStatus === 'created' && isBuyer && resolverAddress && (
             <button
               onClick={handleLinkEscrow}
-              disabled={escrowStatus === 'linking' as any}
+              disabled={isProcessing}
               className="w-full py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white font-medium rounded-xl hover:from-amber-500 hover:to-orange-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-amber-600/20"
             >
-              {escrowStatus === 'linking' ? 'Linking...' : `Link to Deal #${dealId} Condition`}
+              {isProcessing ? 'Linking...' : `Link to Deal #${dealId} Condition`}
             </button>
           )}
 
@@ -928,29 +1105,48 @@ function MatchedSection({
               >
                 {isProcessing ? 'Processing...' : `Fund ${unsealedPrice} USDC${fundMode === 'cross-chain' ? ' (CCTP)' : ''}`}
               </button>
+
+              {cctpMessageBytes && cctpAttestation && (
+                <button
+                  onClick={handleCompleteCCTPMint}
+                  disabled={isProcessing}
+                  className="w-full py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white font-medium rounded-xl hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-600/20"
+                >
+                  {isProcessing ? 'Minting...' : 'Complete Mint on Arbitrum'}
+                </button>
+              )}
             </div>
           )}
 
           {/* Step 4: Redeem (seller) */}
           {escrowId != null && escrowStatus === 'funded' && isSeller && (
             <div className="space-y-2">
-              {conditionMet && (
-                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3">
-                  <div className="flex items-center gap-2 text-xs text-emerald-400">
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span>Condition resolver confirms deal is Matched — ready to redeem.</span>
+              {conditionMet === true ? (
+                <>
+                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3">
+                    <div className="flex items-center gap-2 text-xs text-emerald-400">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>Condition resolver confirms deal is Matched — ready to redeem.</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleRedeemEscrow}
+                    disabled={isProcessing}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-600/20"
+                  >
+                    {isProcessing ? 'Redeeming...' : `Redeem ${unsealedPrice} USDC`}
+                  </button>
+                </>
+              ) : (
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-3">
+                  <div className="flex items-center gap-2 text-xs text-amber-400">
+                    <div className="w-3 h-3 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin flex-shrink-0" />
+                    <span>Waiting for deal condition to be verified on-chain...</span>
                   </div>
                 </div>
               )}
-              <button
-                onClick={handleRedeemEscrow}
-                disabled={isProcessing}
-                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-600/20"
-              >
-                {isProcessing ? 'Redeeming...' : `Redeem ${unsealedPrice} USDC`}
-              </button>
             </div>
           )}
 
@@ -960,6 +1156,9 @@ function MatchedSection({
           )}
           {escrowId != null && escrowStatus !== 'funded' && escrowStatus !== 'redeemed' && isSeller && (
             <p className="text-xs text-slate-500 text-center py-3">Escrow created. Waiting for buyer to link &amp; fund...</p>
+          )}
+          {escrowId != null && escrowStatus === 'funded' && isSeller && conditionMet !== true && (
+            <p className="text-xs text-slate-500 text-center py-3">Escrow funded. Waiting for deal condition to be verified...</p>
           )}
           {escrowId != null && escrowStatus === 'funded' && isBuyer && (
             <p className="text-xs text-emerald-400 text-center py-3">Escrow funded! Waiting for seller to redeem.</p>

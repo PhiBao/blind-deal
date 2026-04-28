@@ -1,8 +1,7 @@
 import { task } from 'hardhat/config'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 import { BlindDeal } from '../typechain-types'
-import { cofhejs, FheTypes } from 'cofhejs/node'
-import { cofhejs_initializeWithHardhatSigner } from 'cofhe-hardhat-plugin'
+import { FheTypes } from '@cofhe/sdk'
 import { getDeployment } from './utils'
 
 task('finalize-deal', 'Finalize a deal after FHE resolution')
@@ -18,7 +17,8 @@ task('finalize-deal', 'Finalize a deal after FHE resolution')
 
 		const [signer] = await ethers.getSigners()
 		console.log(`Finalizing deal as: ${signer.address}`)
-		await cofhejs_initializeWithHardhatSigner(signer)
+
+		const cofheClient = await hre.cofhe.createClientWithBatteries(signer)
 
 		const BlindDeal = await ethers.getContractFactory('BlindDeal')
 		const blindDeal = BlindDeal.attach(address) as unknown as BlindDeal
@@ -34,10 +34,11 @@ task('finalize-deal', 'Finalize a deal after FHE resolution')
 		console.log(`Deal state: ${stateNames[Number(state)]}`)
 
 		if (Number(state) === 1) {
-			// Matched — try to unseal deal price
 			console.log('Deal matched! Unsealing deal price...')
 			const priceHandle = await blindDeal.getDealPrice(dealId)
-			const unsealed = await cofhejs.unseal(priceHandle, FheTypes.Uint64)
+			const unsealed = await cofheClient
+				.decryptForView(priceHandle, FheTypes.Uint64)
+				.execute()
 			console.log(`Deal price:`, unsealed)
 		} else {
 			console.log('No match — neither price was revealed. Privacy preserved.')
