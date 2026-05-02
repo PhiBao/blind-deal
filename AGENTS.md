@@ -16,7 +16,6 @@ contracts/           Solidity (Hardhat)
 frontend/            React + Vite + wagmi v2
   src/components/    UI components (Dashboard, DealDetail, CreateDeal, etc.)
   src/config/        contract.ts (ABIs + addresses), cofhe.tsx, wagmi.ts
-  src/utils/         cctp.ts (Circle CCTP v2 bridge)
   api/escrow/        Vercel serverless API routes (create, fund, redeem)
 
 telegram-bot/        Telegraf bot for deal notifications + share links
@@ -89,6 +88,18 @@ Open → [deadline passed] → Expired
 4. **Redeem** → API server calls `escrow.redeem()` (with simulated fallback for testnet)
 
 **Important**: The Reineira SDK v0.3.1 uses different contract addresses than v0.2.0. The frontend's `contract.ts` must match the SDK's addresses.
+
+### Escrow Contract Addresses (Reineira SDK v0.3.1)
+| Contract | Arbitrum Sepolia Address |
+|---|---|
+| ConfUSDC | `0x42E47f9bA89712C317f60A72C81A610A2b68c48a` |
+| Privara Escrow | `0xbe1EB78504B71beEE1b33D3E3D367A2F9a549A6` |
+
+### Frontend Escrow State
+- Escrow ID, status, and tx hashes are persisted to `localStorage` via `useEscrow.ts`
+- Status values: `none | created | linking | linked | funded | redeemed`
+- After redemption, status persists across page reloads (fixes "redeem button still enabled" bug)
+- Fund/redeem tx hashes shown with explorer links (`sepolia.arbiscan.io` for Arbitrum Sepolia)
 
 ## Testing with Mock FHE
 

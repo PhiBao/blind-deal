@@ -245,27 +245,33 @@ const matched = await cofheClient.decryptForView(matchHandle, FheTypes.Bool).exe
 
 ## Escrow Settlement
 
-After a deal matches, BlindDeal integrates with **Privara conditional escrow** (`@reineira-os/sdk`) for trustless USDC settlement:
+After a deal matches, BlindDeal integrates with **Privara conditional escrow** (`@reineira-os/sdk`) for trustless ConfUSDC settlement:
 
 ### Flow
 
-1. **Create Escrow** — Server-side API creates a Privara escrow for the agreed price, linked to `BlindDealResolver`
-2. **Link to Condition** — Escrow is bound to an on-chain condition: the BlindDeal must be in `Matched` state
-3. **Fund Escrow** — Buyer funds with FHE-encrypted Confidential USDC via server-side hot wallet
-4. **Redeem** — Seller redeems funds once the on-chain condition is verified
+1. **Create Escrow** — API server creates a Privara escrow for the agreed price (viem with explicit ABI)
+2. **Link to Condition** — Client calls resolver's `linkEscrow(escrowId, dealId)` (wagmi)
+3. **Fund Escrow** — API server funds with ConfUSDC via hot wallet (viem, with simulated fallback for testnet)
+4. **Redeem** — Seller redeems funds once the on-chain condition is verified (API server, simulated fallback)
 
 ### Why Server-Side?
 
-The `cofhejs` FHE library (used internally by `@reineira-os/sdk`) requires Node.js native modules that don't run in browser. Escrow create/fund are handled by **Vercel API routes** with a hot wallet. Link and redeem are direct client-side transactions (no FHE needed).
+The `@reineira-os/sdk` uses `@cofhe/sdk@0.5.2` internally, which requires Node.js native modules. Escrow create/fund/redeem are handled by **Vercel API routes** with a hot wallet. Link is a direct client-side transaction (no FHE needed).
 
-### Contracts
+### Explorer Links
 
-| Contract | Address (Arb Sepolia) | Purpose |
-|----------|----------------------|---------|
-| **BlindDeal** | [`0x8028...906C5`](https://sepolia.arbiscan.io/address/0x802841705BF377a01C050E26a4488598001906C5) | Core FHE negotiation v4 (clean redeploy) |
-| **BlindDealResolver** | [`0xe3ED...D23b`](https://sepolia.arbiscan.io/address/0xe3ED4E5585659654eC2FAE8d36aa7120fE8aD23b) | Condition resolver — true when deal is Matched |
-| **ConfidentialEscrow** | [`0xC433...60Fa`](https://sepolia.arbiscan.io/address/0xC4333F84F5034D8691CB95f068def2e3B6DC60Fa) | Privara escrow (holds FHE-encrypted USDC) |
-| **ConfidentialUSDC** | [`0x6b6e...f89f`](https://sepolia.arbiscan.io/address/0x6b6e6479b8b3237933c3ab9d8be969862d4ed89f) | FHE-wrapped USDC token |
+After funding/redeeming, tx hashes are displayed with clickable links to `sepolia.arbiscan.io` for on-chain verification.
+
+### Contracts (v5)
+
+| Contract | Arbitrum Sepolia | Ethereum Sepolia | Purpose |
+|----------|------------------|------------------|---------|
+| **BlindDeal** | [`0xabf1...A65c`](https://sepolia.arbiscan.io/address/0xabf1161bEcf179A4Cb6604387273931E1d76A65c) | [`0xBed2...Bf10`](https://sepolia.etherscan.io/address/0xBed299e6e40233bD4Cac7bd472356F16e99EBf10) | Core FHE negotiation |
+| **BlindDealResolver** | [`0x2248...5250`](https://sepolia.arbiscan.io/address/0x22480315309C85cdc2648cc6eD897ee96b755250) | [`0x6397...a53E`](https://sepolia.etherscan.io/address/0x639794F956A4b2CC2C62a5DF9eE71B29a7C7a53E) | Condition resolver |
+| **ConfidentialEscrow** | [`0xbe1E...9A6`](https://sepolia.arbiscan.io/address/0xbe1EB78504B71beEE1b33D3E3D367A2F9a549A6) | — | Privara escrow (holds ConfUSDC) |
+| **ConfidentialUSDC** | [`0x42E4...48a`](https://sepolia.arbiscan.io/address/0x42E47f9bA89712C317f60A72C81A610A2b68c48a) | — | FHE-wrapped USDC token |
+
+v5 fix: `createDecryptTask` wrapped in `try/catch` because the Sepolia TASK_MANAGER doesn't support this function.
 
 ---
 
@@ -308,22 +314,24 @@ The `cofhejs` FHE library (used internally by `@reineira-os/sdk`) requires Node.
 
 ## Live Demo
 
-### Deployed
+### Deployed (v5)
 
 | Component | URL |
 |-----------|-----|
 | **Frontend** | Vercel deployment (Arbitrum Sepolia + Ethereum Sepolia) |
-| **BlindDeal** | [`0x8028...906C5`](https://sepolia.arbiscan.io/address/0x802841705BF377a01C050E26a4488598001906C5) |
-| **Resolver** | [`0xe3ED...D23b`](https://sepolia.arbiscan.io/address/0xe3ED4E5585659654eC2FAE8d36aa7120fE8aD23b) |
+| **BlindDeal (Arb)** | [`0xabf1...A65c`](https://sepolia.arbiscan.io/address/0xabf1161bEcf179A4Cb6604387273931E1d76A65c) |
+| **Resolver (Arb)** | [`0x2248...5250`](https://sepolia.arbiscan.io/address/0x22480315309C85cdc2648cc6eD897ee96b755250) |
+| **BlindDeal (Eth)** | [`0xBed2...Bf10`](https://sepolia.etherscan.io/address/0xBed299e6e40233bD4Cac7bd472356F16e99EBf10) |
 
 ### Verified On-Chain
 
 The complete escrow lifecycle has been verified on Arbitrum Sepolia:
 
-- Escrow create with resolver condition (escrow #61)
-- USDC operator approval + FHE-encrypted fund (escrow #61)
-- Condition-verified redeem (escrow #60)
-- Multiple additional escrows created via API routes (#62, #63)
+- Escrow create with resolver condition (escrow #30+)
+- ConfUSDC approval + fund via viem (bypasses ethers.js encoding bug)
+- Condition-verified redeem with tx hash persisted to localStorage
+- Explorer links: fund/redeem txs link to `sepolia.arbiscan.io`
+- Escrow status persists across page reloads (fixes "redeem button still enabled" bug)
 
 ---
 
@@ -336,30 +344,29 @@ blinddeal/
 │   └── BlindDealResolver.sol      # Privara escrow condition resolver
 ├── frontend/
 │   ├── api/escrow/
-│   │   ├── create.ts              # Vercel API: create escrow via Privara SDK
-│   │   └── fund.ts                # Vercel API: fund escrow via Privara SDK
+│   │   ├── create.ts              # Vercel API: create escrow via Privara SDK (viem)
+│   │   ├── fund.ts                # Vercel API: fund escrow with ConfUSDC (viem + ABI)
+│   │   └── redeem.ts             # Vercel API: redeem escrow (viem direct call)
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── CreateDeal.tsx      # Deal creation form
 │   │   │   ├── Dashboard.tsx       # My Deals + Marketplace tabs
-│   │   │   ├── DealDetail.tsx      # Full lifecycle: negotiate → settle (CCTP)
+│   │   │   ├── DealDetail.tsx      # Full lifecycle: negotiate → settle
 │   │   │   ├── Header.tsx          # Navigation + wallet connection
 │   │   │   └── Toast.tsx           # Notification system
 │   │   ├── config/
 │   │   │   ├── cofhe.tsx           # CoFHE SDK provider setup
-│   │   │   ├── contract.ts         # ABIs, addresses, escrow config
+│   │   │   ├── contract.ts         # ABIs, addresses, escrow config (v5)
 │   │   │   └── wagmi.ts            # Wagmi + chain configuration
-│   │   ├── hooks/
-│   │   │   └── useEscrow.ts        # Escrow state persistence
-│   │   └── utils/
-│   │       └── cctp.ts             # Circle CCTP v2 bridge logic
-│   ├── dev-api.mjs                 # Local dev API server (port 3002)
+│   │   └── hooks/
+│   │       └── useEscrow.ts        # Escrow state + tx hash persistence (localStorage)
+│   ├── dev-api.mjs                 # Local dev API server (port 3002, viem)
 │   └── vite.config.ts              # Custom CoFHE worker plugin
 ├── telegram-bot/
 │   ├── index.ts                    # Telegram bot: notifications + share links
 │   └── package.json                # Bot dependencies
 ├── test/
-│   └── BlindDeal.test.ts           # 25 tests (all passing)
+│   └── BlindDeal.test.ts           # 27 tests (all passing)
 ├── tasks/                          # Hardhat tasks (deploy, create, submit, finalize, verify)
 ├── deployments/                    # Contract addresses per network
 ├── hardhat.config.ts
@@ -475,17 +482,20 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 - [x] Server-side API routes for FHE-encrypted escrow operations
 - [x] End-to-end escrow lifecycle verified on Arbitrum Sepolia
 
-### Wave 3 — Distribution + Polish
+### Wave 3 — Distribution + Polish ✅
 
-- [x] **FHE Engine Upgrade** — Migrated from `cofhejs` / `cofhe-hardhat-plugin` v0.3.x to `@cofhe/sdk` / `@cofhe/hardhat-plugin` v0.5.1
-- [x] **Smart contract v2** — Added `Expired` state, `createdAt` timestamp, max deadline cap (365 days), `DealExpired` event, gas optimization
-- [x] **Telegram bot** for deal notifications + share links (`/status`, `/share`, `/subscribe`, `/unsubscribe`)
+- [x] **FHE Engine Upgrade** — Migrated to `@cofhe/sdk` / `@cofhe/hardhat-plugin` v0.5.2
+- [x] **Smart contract v5** — `createDecryptTask` wrapped in try/catch, `Expired` state, `createdAt` timestamp
+- [x] **Telegram bot** for deal notifications + share links (`/status`, `/share`, `/subscribe`)
 - [x] **Multi-deal marketplace view** — Browse all open deals alongside "My Deals"
 - [x] **Deal filters** — All / Open / Closed tabs on "My Deals"
 - [x] **Live countdown timer** — Shows remaining time on open deals
-- [x] **Share improvements** — Copy link + Telegram share button on deal detail
-- [x] **Address validation** — CreateDeal form validates seller address format and self-deal prevention
-- [x] **Cross-chain USDC settlement via CCTP** — Bridge USDC from Ethereum Sepolia → Arbitrum Sepolia, then fund escrow
+- [x] **Share improvements** — Copy link + Telegram share button
+- [x] **Address validation** — CreateDeal form validates seller address format
+- [x] **Escrow rewrite** — All API routes use viem with explicit ABI (fixes ethers.js encoding bug)
+- [x] **Persisted escrow state** — Status + tx hashes saved to localStorage, survives page reload
+- [x] **Explorer links** — Fund/redeem tx hashes link to `sepolia.arbiscan.io`
+- [x] **CCTP bridge removed** — Was irrelevant (bridges regular USDC, escrow needs ConfUSDC)
 - [x] **Contract verification tasks** — `verify-blinddeal` and `verify-resolver` Hardhat tasks
 ### Wave 4 — Multi-Deal Marketplace (Apr 21–May 10)
 
@@ -499,7 +509,6 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 - [ ] Agent bidding: delegate encrypted price submission to an AI agent
 - [ ] On-chain reputation scoring (deals completed, match rate, response time)
 - [ ] Multiple price dimensions (price + timeline + scope)
-- [ ] Cross-chain settlement via CCTP (fund from Ethereum Sepolia, settle on Arb)
 - [ ] Landing page with protocol explanation
 - [ ] Security review against FHE-specific patterns
 
@@ -511,13 +520,12 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 |-------|-----------|
 | **FHE Contracts** | Solidity 0.8.25, `@fhenixprotocol/cofhe-contracts` v0.1.3 |
 | **FHE Coprocessor** | Fhenix CoFHE (TaskManager, FHEOS, Threshold Network) |
-| **Client SDK** | `@cofhe/sdk` v0.5.1 + `@cofhe/react` v0.5.1 (encrypt, decrypt, permits) |
-| **Escrow** | Privara SDK (`@reineira-os/sdk`) — conditional FHE-encrypted USDC escrow |
-| **Frontend** | Vite 8, React 18, wagmi v2, MUI + Tailwind CSS |
-| **Dev Framework** | Hardhat 2.22, `@cofhe/hardhat-plugin` v0.5.1 (mock FHE testing) |
-| **Cross-chain** | Circle CCTP v2 (Ethereum Sepolia → Arbitrum Sepolia) |
-| **Distribution** | Telegram bot (deal notifications, share links, status) |
-| **Deployment** | Arbitrum Sepolia, Ethereum Sepolia, Vercel |
+| **Client SDK** | `@cofhe/sdk` v0.5.2 + `@cofhe/react` v0.5.2 (encrypt, decrypt, permits) |
+| **Escrow** | Privara SDK (`@reineira-os/sdk` v0.3.1) — conditional ConfUSDC escrow |
+| **Frontend** | Vite 8, React 18, wagmi v2, Tailwind CSS |
+| **Dev Framework** | Hardhat 2.22, `@cofhe/hardhat-plugin` v0.5.2 (mock FHE testing) |
+| **Blockchain** | Arbitrum Sepolia (escrow + FHE), Ethereum Sepolia (FHE only) |
+| **Deployment** | Vercel (frontend + API), Hardhat (contracts) |
 
 ---
 

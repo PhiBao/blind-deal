@@ -11,8 +11,8 @@ import {
 } from 'wagmi';
 import { useCofheEncrypt, useCofheClient, useCofheConnection } from '@cofhe/react';
 import { Encryptable, FheTypes } from '@cofhe/sdk';
-import { createWalletClient, custom, type Account, type Chain, type Transport } from 'viem';
-import { sepolia, arbitrumSepolia } from 'viem/chains';
+import { type Account, type Chain, type Transport } from 'viem';
+import { sepolia } from 'viem/chains';
 import {
   BLIND_DEAL_ABI,
   useBlindDealAddress,
@@ -24,8 +24,7 @@ import {
   DEAL_STATE_LABELS,
   DEAL_STATE_COLORS,
 } from '../config/contract';
-import { getStoredEscrowId, storeEscrowId } from '../hooks/useEscrow';
-import { bridgeUSDCViaCCTP, receiveCCTPMessageOnArbitrum } from '../utils/cctp';
+import { getStoredEscrowId, storeEscrowId, getStoredEscrowStatus, getStoredFundTxHash, getStoredRedeemTxHash, storeEscrowData } from '../hooks/useEscrow';
 import type { ToastType } from './Toast';
 
 // ── Toast context (provided by App) ─────────────────────────────────
@@ -765,13 +764,25 @@ function MatchedSection({
   const { address: userAddress } = useAccount();
   const publicClient = usePublicClient();
   const [escrowId, setEscrowId] = useState<bigint | null>(() => getStoredEscrowId(dealId, chainId));
-  const [escrowStatus, setEscrowStatus] = useState<'none' | 'created' | 'linking' | 'linked' | 'funded' | 'redeemed'>('none');
+  const [escrowStatus, setEscrowStatus] = useState<'none' | 'created' | 'linking' | 'linked' | 'funded' | 'redeemed'>(
+    () => getStoredEscrowStatus(dealId, chainId)
+  );
+  const [fundTxHash, setFundTxHash] = useState<string | null>(() => getStoredFundTxHash(dealId, chainId));
+  const [redeemTxHash, setRedeemTxHash] = useState<string | null>(() => getStoredRedeemTxHash(dealId, chainId));
   const [isProcessing, setIsProcessing] = useState(false);
   const [escrowError, setEscrowError] = useState<string | null>(null);
-  const [fundMode, setFundMode] = useState<'local' | 'cross-chain'>('local');
-  const [cctpProgress, setCctpProgress] = useState<string | null>(null);
-  const [cctpMessageBytes, setCctpMessageBytes] = useState<`0x${string}` | null>(null);
-  const [cctpAttestation, setCctpAttestation] = useState<string | null>(null);
+
+  // Persist escrow status changes
+  useEffect(() => {
+    if (escrowId != null) {
+      storeEscrowData(dealId, chainId, { status: escrowStatus });
+    }
+  }, [escrowStatus, escrowId, dealId, chainId]);
+
+  // Explorer helper
+  const explorerUrl = chainId === 421614
+    ? 'https://sepolia.arbiscan.io/tx'
+    : 'https://sepolia.etherscan.io/tx';
 
   // Check if escrow is linked to resolver
   const { data: isRegistered, refetch: refetchRegistered } = useReadContract({
@@ -901,31 +912,6 @@ function MatchedSection({
     setIsProcessing(true);
     setEscrowError(null);
 
-    // Cross-chain flow kept as-is
-    if (fundMode === 'cross-chain') {
-      const usdcAmount = BigInt(unsealedPrice.toString()) * 10n ** 6n;
-      const tid = toast('loading', 'Starting CCTP cross-chain bridge...');
-      try {
-        const ethereum = (window as any).ethereum;
-        if (!ethereum) throw new Error('No wallet detected');
-        await ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xaa36a7' }] });
-        const ethWalletClient = createWalletClient({ account: userAddress!, chain: sepolia, transport: custom(ethereum) });
-        setCctpProgress('Approving USDC on Ethereum Sepolia...');
-        const { messageBytes, attestation } = await bridgeUSDCViaCCTP({
-          amount: usdcAmount, recipient: userAddress!, ethWalletClient,
-          arbPublicClient: publicClient!, onProgress: (p) => setCctpProgress(p.message ?? null),
-        });
-        setCctpMessageBytes(messageBytes); setCctpAttestation(attestation);
-        update(tid, 'success', 'CCTP burn complete. Complete mint on Arbitrum.');
-        setIsProcessing(false);
-      } catch (err) {
-        setEscrowError(err instanceof Error ? err.message : 'CCTP bridge failed');
-        update(tid, 'error', err instanceof Error ? err.message : 'CCTP');
-        setIsProcessing(false);
-      }
-      return;
-    }
-
     const tid = toast('loading', 'Funding escrow via Privara...');
     try {
       const response = await fetch('/api/escrow/fund', {
@@ -936,6 +922,10 @@ function MatchedSection({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Fund request failed');
       setEscrowStatus('funded');
+      if (data.tx_hash) {
+        setFundTxHash(data.tx_hash);
+        storeEscrowData(dealId, chainId, { fundTxHash: data.tx_hash });
+      }
       setIsProcessing(false);
       update(tid, 'success', data.simulated
         ? `Escrow funded (testnet simulation — on-chain pending)`
@@ -943,45 +933,6 @@ function MatchedSection({
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fund escrow';
-      setEscrowError(msg);
-      update(tid, 'error', msg);
-      setIsProcessing(false);
-    }
-  };
-
-  const handleCompleteCCTPMint = async () => {
-    if (!cctpMessageBytes || !cctpAttestation) return;
-    setIsProcessing(true);
-    const tid = toast('loading', 'Minting USDC on Arbitrum Sepolia...');
-    try {
-      const ethereum = (window as any).ethereum;
-      if (!ethereum) throw new Error('No wallet detected');
-
-      // Ensure on Arbitrum Sepolia
-      await ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x66eee' }], // 421614
-      });
-
-      const arbWalletClient = createWalletClient({
-        account: userAddress!,
-        chain: arbitrumSepolia,
-        transport: custom(ethereum),
-      });
-
-      await receiveCCTPMessageOnArbitrum({
-        messageBytes: cctpMessageBytes,
-        attestation: cctpAttestation,
-        arbWalletClient,
-      });
-
-      setCctpProgress('Mint complete! Now fund escrow locally with minted USDC.');
-      setCctpMessageBytes(null);
-      setCctpAttestation(null);
-      update(tid, 'success', 'CCTP mint complete on Arbitrum');
-      setIsProcessing(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'CCTP mint failed';
       setEscrowError(msg);
       update(tid, 'error', msg);
       setIsProcessing(false);
@@ -1007,6 +958,10 @@ function MatchedSection({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Redeem failed');
       setEscrowStatus('redeemed');
+      if (data.tx_hash) {
+        setRedeemTxHash(data.tx_hash);
+        storeEscrowData(dealId, chainId, { redeemTxHash: data.tx_hash });
+      }
       setIsProcessing(false);
       toast('success', data.simulated
         ? 'Escrow redeemed (testnet simulation). Settlement complete!'
@@ -1134,69 +1089,13 @@ function MatchedSection({
           {/* Step 3: Fund escrow (buyer) — only after link confirmed */}
           {escrowId != null && escrowStatus === 'linked' && isBuyer && (
             <div className="space-y-3">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setFundMode('local')}
-                  className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg border transition-all ${
-                    fundMode === 'local'
-                      ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300 ring-1 ring-indigo-500/20'
-                      : 'border-white/[0.08] text-slate-400 hover:bg-white/[0.04]'
-                  }`}
-                >
-                  <span className="block text-sm mb-0.5">Fund Locally</span>
-                  <span className="text-[10px] text-slate-500">Same chain USDC</span>
-                </button>
-                <button
-                  onClick={() => setFundMode('cross-chain')}
-                  className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg border transition-all ${
-                    fundMode === 'cross-chain'
-                      ? 'bg-violet-500/20 border-violet-500/30 text-violet-300 ring-1 ring-violet-500/20'
-                      : 'border-white/[0.08] text-slate-400 hover:bg-white/[0.04]'
-                  }`}
-                >
-                  <span className="block text-sm mb-0.5">CCTP Bridge</span>
-                  <span className="text-[10px] text-slate-500">From Eth Sepolia</span>
-                </button>
-              </div>
-
-              {fundMode === 'cross-chain' && (
-                <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3">
-                  <div className="flex items-center gap-2 text-xs text-violet-300 mb-1">
-                    <span className="font-medium">Cross-chain via CCTP</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    Burns USDC on Ethereum Sepolia → mints on Arbitrum Sepolia → auto-funds escrow.
-                    Takes ~5-15 min.
-                  </p>
-                </div>
-              )}
-
-              {cctpProgress && (
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin flex-shrink-0" />
-                    <p className="text-xs text-amber-300">{cctpProgress}</p>
-                  </div>
-                </div>
-              )}
-
               <button
                 onClick={handleFundEscrow}
                 disabled={isProcessing}
                 className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-600/20"
               >
-                {isProcessing ? 'Processing...' : `Fund ${unsealedPrice} USDC${fundMode === 'cross-chain' ? ' (CCTP)' : ''}`}
+                {isProcessing ? 'Processing...' : `Fund ${unsealedPrice} USDC`}
               </button>
-
-              {cctpMessageBytes && cctpAttestation && (
-                <button
-                  onClick={handleCompleteCCTPMint}
-                  disabled={isProcessing}
-                  className="w-full py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white font-medium rounded-xl hover:from-violet-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-violet-600/20"
-                >
-                  {isProcessing ? 'Minting...' : 'Complete Mint on Arbitrum'}
-                </button>
-              )}
             </div>
           )}
 
@@ -1248,18 +1147,31 @@ function MatchedSection({
 
           {/* Redeemed */}
           {escrowStatus === 'redeemed' && (
-            <div className="text-center py-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+            <div className="text-center py-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-2">
               <svg className="w-8 h-8 mx-auto text-emerald-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <p className="text-emerald-400 font-medium">Settlement Complete</p>
-              <p className="text-xs text-slate-500 mt-1">{unsealedPrice.toString()} USDC settled via Privara Escrow #{escrowId?.toString()}</p>
+              <p className="text-xs text-slate-500">{unsealedPrice?.toString()} USDC settled via Privara Escrow #{escrowId?.toString()}</p>
+              {redeemTxHash && (
+                <a
+                  href={`${explorerUrl}/${redeemTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  View redeem tx
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              )}
             </div>
           )}
 
           {/* Escrow info bar */}
           {escrowId != null && escrowStatus !== 'redeemed' && (
-            <div className="mt-3 bg-white/[0.04] border border-white/[0.06] rounded-xl p-3">
+            <div className="mt-3 bg-white/[0.04] border border-white/[0.06] rounded-xl p-3 space-y-1">
               <div className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <span className="text-slate-500">Escrow #{escrowId.toString()}</span>
@@ -1275,6 +1187,19 @@ function MatchedSection({
                   {escrowStatus}
                 </span>
               </div>
+              {fundTxHash && (
+                <a
+                  href={`${explorerUrl}/${fundTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  View fund tx
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              )}
             </div>
           )}
 
