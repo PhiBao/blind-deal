@@ -23,8 +23,14 @@ try {
 export const wagmiConfig = createConfig({
   chains: [arbitrumSepolia, sepolia],
   transports: {
-    [arbitrumSepolia.id]: http(),
-    [sepolia.id]: http(),
+    [arbitrumSepolia.id]: http(
+      import.meta.env.VITE_ARBITRUM_SEPOLIA_RPC_URL || undefined,
+      { batch: { batchSize: 3, wait: 500 } },
+    ),
+    [sepolia.id]: http(
+      import.meta.env.VITE_SEPOLIA_RPC_URL || undefined,
+      { batch: { batchSize: 3, wait: 500 } },
+    ),
   },
   connectors: [injected({ shimDisconnect: true })],
   multiInjectedProviderDiscovery: true,

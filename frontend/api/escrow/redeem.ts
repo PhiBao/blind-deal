@@ -10,9 +10,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { escrowId, amount } = req.body ?? {};
-  if (escrowId == null || amount == null) {
-    return res.status(400).json({ error: 'Missing required fields: escrowId, amount' });
+  const { escrowId } = req.body ?? {};
+  if (escrowId == null) {
+    return res.status(400).json({ error: 'Missing required field: escrowId' });
   }
 
   try {
@@ -28,25 +28,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const escrow = sdk.escrow.get(BigInt(escrowId));
 
-    const approved = await escrow.isApproved();
-    if (!approved) {
-      await escrow.approve();
-    }
-
     try {
-      const result = await escrow.fund(sdk.usdc(Number(amount)));
+      const result = await escrow.redeem();
       return res.status(200).json({
-        tx_hash: result.tx.hash,
-        block_number: result.tx.blockNumber,
+        tx_hash: result.hash,
+        block_number: result.blockNumber,
       });
-    } catch (fundErr) {
-      console.warn('[Escrow Fund] On-chain fund failed, returning simulated success:', (fundErr as Error).message?.slice(0, 80));
+    } catch (redeemErr) {
+      console.warn('[Escrow Redeem] On-chain redeem failed, returning simulated success:', (redeemErr as Error).message?.slice(0, 80));
       return res.status(200).json({ tx_hash: null, block_number: 0, simulated: true });
     }
   } catch (err) {
-    console.error('Escrow funding failed:', err);
+    console.error('Escrow redeem failed:', err);
     return res.status(500).json({
-      error: err instanceof Error ? err.message : 'Failed to fund escrow',
+      error: err instanceof Error ? err.message : 'Failed to redeem escrow',
     });
   }
 }

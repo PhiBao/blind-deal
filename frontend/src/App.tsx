@@ -120,11 +120,23 @@ function AppContent() {
     if (dealParam) {
       try {
         setView({ page: 'deal', dealId: BigInt(dealParam) });
-        // Clean up URL without reloading
-        window.history.replaceState({}, '', window.location.pathname);
       } catch {}
     }
   }, []);
+
+  // Sync URL with current view for refresh persistence
+  useEffect(() => {
+    if (view.page === 'deal' && view.dealId != null) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('deal', view.dealId.toString());
+      window.history.replaceState({}, '', url.toString());
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('deal');
+      url.searchParams.delete('chain');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [view]);
 
   return (
     <DealToastContext.Provider value={{ toast, update }}>
@@ -152,6 +164,7 @@ function AppContent() {
             )}
             {view.page === 'deal' && (
               <DealDetail
+                key={`deal-${view.dealId?.toString()}`}
                 dealId={view.dealId}
                 onBack={() => setView({ page: 'dashboard' })}
               />

@@ -1,18 +1,18 @@
 import { useChainId } from 'wagmi';
 
-// v2 contract addresses (Expired state, createdAt, max deadline, gas-optimized ACL)
+// v5 contract addresses (redeployed May 2026 — createDecryptTask wrapped in try/catch)
 const CONTRACT_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0xCd587f1d57c24cff0D83c1A5f686D2d364114c55', // Arbitrum Sepolia (v2)
-  11155111: '0xBe1F302cbfAbc88494e93E0ca28C44f614cc9EC6', // Ethereum Sepolia (v2)
+  421614: '0xabf1161bEcf179A4Cb6604387273931E1d76A65c', // Arbitrum Sepolia (v5)
+  11155111: '0xBed299e6e40233bD4Cac7bd472356F16e99EBf10', // Ethereum Sepolia (v5)
 };
 
 const RESOLVER_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0x0413900b49F140aE7d9F4e2040A8Ec923582A475', // Arbitrum Sepolia (v2)
-  11155111: '0x194365D8081185e09960cdC2B599101Af8f95502', // Ethereum Sepolia (v2)
+  421614: '0x22480315309C85cdc2648cc6eD897ee96b755250', // Arbitrum Sepolia (v5)
+  11155111: '0x639794F956A4b2CC2C62a5DF9eE71B29a7C7a53E', // Ethereum Sepolia (v5)
 };
 
 // Fallback for when no wallet is connected (e.g. read-only views)
-export const BLIND_DEAL_ADDRESS_FALLBACK = CONTRACT_ADDRESSES[421614];
+export const BLIND_DEAL_ADDRESS_FALLBACK = CONTRACT_ADDRESSES[11155111];
 
 export function useBlindDealAddress(): `0x${string}` {
   const chainId = useChainId();
@@ -68,6 +68,7 @@ export const BLIND_DEAL_ABI = [
       { indexed: true, name: 'buyer', type: 'address' },
       { indexed: true, name: 'seller', type: 'address' },
       { indexed: false, name: 'description', type: 'string' },
+      { indexed: false, name: 'deadline', type: 'uint256' },
     ],
   },
   {
@@ -240,11 +241,11 @@ export const DEAL_STATE_COLORS: Record<DealState, string> = {
 // ── Privara / ReineiraOS Escrow (direct contract calls) ─────────────
 
 const ESCROW_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0xC4333F84F5034D8691CB95f068def2e3B6DC60Fa', // Arbitrum Sepolia
+  421614: '0xbe1eEB78504B71beEE1b33D3E3D367A2F9a549A6', // Arbitrum Sepolia (Reineira v0.3.1)
 };
 
 const CONF_USDC_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0x6b6e6479b8b3237933c3ab9d8be969862d4ed89f', // Arbitrum Sepolia
+  421614: '0x42E47f9bA89712C317f60A72C81A610A2b68c48a', // Arbitrum Sepolia (Reineira v0.3.1)
 };
 
 export function useEscrowAddress(): `0x${string}` | undefined {

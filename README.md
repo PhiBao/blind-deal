@@ -262,8 +262,8 @@ The `cofhejs` FHE library (used internally by `@reineira-os/sdk`) requires Node.
 
 | Contract | Address (Arb Sepolia) | Purpose |
 |----------|----------------------|---------|
-| **BlindDeal** | [`0xCd58...4c55`](https://sepolia.arbiscan.io/address/0xCd587f1d57c24cff0D83c1A5f686D2d364114c55) | Core FHE negotiation v2 (Expired state, createdAt) |
-| **BlindDealResolver** | [`0x0413...A475`](https://sepolia.arbiscan.io/address/0x0413900b49F140aE7d9F4e2040A8Ec923582A475) | Condition resolver — true when deal is Matched |
+| **BlindDeal** | [`0x8028...906C5`](https://sepolia.arbiscan.io/address/0x802841705BF377a01C050E26a4488598001906C5) | Core FHE negotiation v4 (clean redeploy) |
+| **BlindDealResolver** | [`0xe3ED...D23b`](https://sepolia.arbiscan.io/address/0xe3ED4E5585659654eC2FAE8d36aa7120fE8aD23b) | Condition resolver — true when deal is Matched |
 | **ConfidentialEscrow** | [`0xC433...60Fa`](https://sepolia.arbiscan.io/address/0xC4333F84F5034D8691CB95f068def2e3B6DC60Fa) | Privara escrow (holds FHE-encrypted USDC) |
 | **ConfidentialUSDC** | [`0x6b6e...f89f`](https://sepolia.arbiscan.io/address/0x6b6e6479b8b3237933c3ab9d8be969862d4ed89f) | FHE-wrapped USDC token |
 
@@ -313,8 +313,8 @@ The `cofhejs` FHE library (used internally by `@reineira-os/sdk`) requires Node.
 | Component | URL |
 |-----------|-----|
 | **Frontend** | Vercel deployment (Arbitrum Sepolia + Ethereum Sepolia) |
-| **BlindDeal** | [`0xCd58...4c55`](https://sepolia.arbiscan.io/address/0xCd587f1d57c24cff0D83c1A5f686D2d364114c55) |
-| **Resolver** | [`0x0413...A475`](https://sepolia.arbiscan.io/address/0x0413900b49F140aE7d9F4e2040A8Ec923582A475) |
+| **BlindDeal** | [`0x8028...906C5`](https://sepolia.arbiscan.io/address/0x802841705BF377a01C050E26a4488598001906C5) |
+| **Resolver** | [`0xe3ED...D23b`](https://sepolia.arbiscan.io/address/0xe3ED4E5585659654eC2FAE8d36aa7120fE8aD23b) |
 
 ### Verified On-Chain
 

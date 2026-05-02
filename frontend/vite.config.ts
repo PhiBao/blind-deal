@@ -38,7 +38,9 @@ function cofheWorkerPlugin(): Plugin {
     name: 'cofhe-worker-serve',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url?.includes('zkProve.worker.js')) {
+        const url = req.url || '';
+
+        if (url.includes('zkProve.worker.js')) {
           const workerPath = path.join(cofheSdkDistPath, 'zkProve.worker.js');
           if (fs.existsSync(workerPath)) {
             let content = fs.readFileSync(workerPath, 'utf-8');
@@ -51,6 +53,7 @@ function cofheWorkerPlugin(): Plugin {
             );
             res.setHeader('Content-Type', 'application/javascript');
             res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
             res.end(content);
             return;
           }
@@ -62,6 +65,7 @@ function cofheWorkerPlugin(): Plugin {
 }
 
 export default defineConfig({
+  envDir: '..',
   plugins: [cofheWorkerPlugin(), react(), wasm()],
   resolve: {
     alias: {

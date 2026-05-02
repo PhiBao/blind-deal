@@ -350,6 +350,11 @@ function DealRow({ dealId, onSelect, currentUser }: { dealId: bigint; onSelect: 
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'isDealSubmitted', args: [dealId] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealDeadline', args: [dealId] },
     ],
+    query: {
+      staleTime: 0,
+      gcTime: 0,
+      placeholderData: undefined,
+    },
   });
 
   if (!results || results.some(r => r.status === 'failure')) {

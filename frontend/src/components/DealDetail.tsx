@@ -7,6 +7,7 @@ import {
   useWaitForTransactionReceipt,
   useChainId,
   usePublicClient,
+  useSwitchChain,
 } from 'wagmi';
 import { useCofheEncrypt, useCofheClient, useCofheConnection } from '@cofhe/react';
 import { Encryptable, FheTypes } from '@cofhe/sdk';
@@ -74,7 +75,7 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
   const contractAddress = useBlindDealAddress();
   const chainId = useChainId();
 
-  const { data: results, refetch } = useReadContracts({
+  const { data: results, refetch, isLoading: isContractsLoading, isError: isContractsError } = useReadContracts({
     contracts: [
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealState', args: [dealId] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealParties', args: [dealId] },
@@ -82,18 +83,49 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'isDealSubmitted', args: [dealId] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealDeadline', args: [dealId] },
     ],
-    query: { refetchInterval: 8000 },
+    query: {
+      refetchInterval: 10000,
+      staleTime: 5000,
+      gcTime: 0,
+      enabled: !!contractAddress && dealId != null,
+      retry: 2,
+      retryDelay: 3000,
+      placeholderData: undefined,
+    },
   });
 
-  if (!results || results.some((r) => r.status === 'failure')) {
+  // Validate all contract results before rendering
+  const allSuccess = results != null && results.length === 5 && results.every((r) => r != null && r.status === 'success');
+  const hasErrors = isContractsError || (results != null && results.some((r) => r != null && r.status === 'failure'));
+
+  if (!address || !allSuccess) {
     return (
       <div className="max-w-lg mx-auto">
         <button onClick={onBack} className="text-sm text-slate-400 hover:text-indigo-400 mb-4 inline-flex items-center gap-1 transition-colors">← Back</button>
         <div className="glass rounded-2xl p-8">
-          <div className="flex items-center justify-center gap-2">
-            <div className="w-5 h-5 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />
-            <span className="text-slate-400 text-sm">Loading deal...</span>
-          </div>
+          {hasErrors ? (
+            <div className="text-center">
+              <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-amber-500/10 flex items-center justify-center">
+                <svg className="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <p className="text-white font-medium mb-1">Deal Not Found</p>
+              <p className="text-sm text-slate-400 mb-1">Deal #{dealId.toString()} may not exist or the RPC is unresponsive.</p>
+              <p className="text-xs text-slate-500 mb-4">Check that you are on the correct network and the contract is deployed.</p>
+              <button
+                onClick={() => refetch()}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-500 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-5 h-5 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />
+              <span className="text-slate-400 text-sm">Loading deal...</span>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -344,7 +376,7 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
   const cofheConnection = useCofheConnection();
   const { address: userAddress } = useAccount();
   const { writeContract, data: txHash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess, isError: isTxError } = useWaitForTransactionReceipt({ hash: txHash });
 
   useEffect(() => {
     if (isSuccess) onSuccess();
@@ -384,19 +416,27 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
       if (!encrypted || !encrypted[0]?.signature) {
         throw new Error('FHE encryption returned invalid data. Please refresh and try again.');
       }
+      const sig = encrypted[0].signature as string;
+      const sigHex = sig.startsWith('0x') ? sig : `0x${sig}`;
+      const sigByteLen = (sigHex.length - 2) / 2;
       console.log('[BlindDeal] Encrypted result:', {
         ctHash: encrypted[0].ctHash.toString(16),
         securityZone: encrypted[0].securityZone,
         utype: encrypted[0].utype,
-        signatureLength: encrypted[0].signature.length,
+        signatureStringLength: sig.length,
+        signatureHexBytes: sigByteLen,
       });
+      if (sigByteLen !== 65 && sigByteLen !== 64) {
+        update(tid, 'error', `Unexpected signature length: ${sigByteLen} bytes (expected 65). The FHE worker may not have loaded correctly. Please refresh the page and try again.`);
+        return;
+      }
       update(tid, 'loading', 'Submitting encrypted price...');
 
       const input = {
         ctHash: encrypted[0].ctHash,
         securityZone: encrypted[0].securityZone,
         utype: encrypted[0].utype,
-        signature: encrypted[0].signature as `0x${string}`,
+        signature: sigHex as `0x${string}`,
       };
 
       writeContract({
@@ -407,9 +447,15 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
       });
       update(tid, 'info', 'Confirm in your wallet...');
     } catch (err) {
-      update(tid, 'error', err instanceof Error ? err.message : 'Encryption failed');
+      const msg = err instanceof Error ? err.message : 'Encryption failed';
+      update(tid, 'error', msg);
     }
   };
+
+  // Track tx failures for user guidance
+  const txFailed = isTxError || (error != null);
+  const txErrorMsg = error?.message?.split('\n')[0] || '';
+  const isNonRetryableError = txErrorMsg.includes('User rejected') || txErrorMsg.includes('cancelled');
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -457,8 +503,23 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
       </button>
 
       {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-2">
           <p className="text-sm text-red-400">{error.message.split('\n')[0]}</p>
+          {!isNonRetryableError && (
+            <p className="text-xs text-slate-500">
+              The transaction was reverted on-chain. This can happen if the FHE proof was not generated correctly.
+              Try refreshing the page to reload the zk-proof worker, then submit again.
+            </p>
+          )}
+        </div>
+      )}
+
+      {txFailed && !isNonRetryableError && (
+        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-2">
+          <p className="text-sm text-red-400">Transaction failed on-chain</p>
+          <p className="text-xs text-slate-500">
+            The encrypted proof was rejected by the contract. Try refreshing the page and submitting again.
+          </p>
         </div>
       )}
     </form>
@@ -469,11 +530,12 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
 
 function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () => void }) {
   const contractAddress = useBlindDealAddress();
-  const { toast } = useContext(DealToastContext);
+  const { toast, update } = useContext(DealToastContext);
   const cofheClient = useCofheClient();
   const cofheConnection = useCofheConnection();
-  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const publicClient = usePublicClient();
+  const { writeContractAsync, isPending } = useWriteContract();
+  const [isConfirming, setIsConfirming] = useState(false);
 
   // Read the encrypted match handle from contract
   const { data: matchHandle } = useReadContract({
@@ -511,22 +573,28 @@ function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () 
     return () => { cancelled = true; };
   }, [matchHandle, cofheClient, cofheConnection.connected]);
 
-  useEffect(() => {
-    if (isSuccess) {
-      toast('success', 'Deal finalized! FHE comparison complete.');
-      onSuccess();
+  const handleFinalize = async () => {
+    if (matchResult == null || !publicClient) return;
+    setIsConfirming(true);
+    const tid = toast('loading', 'Finalizing deal...');
+    try {
+      const hash = await writeContractAsync({
+        address: contractAddress,
+        abi: BLIND_DEAL_ABI,
+        functionName: 'clientFinalizeDeal',
+        args: [dealId, matchResult],
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status === 'success') {
+        toast('success', 'Deal finalized! FHE comparison complete.');
+        onSuccess();
+      } else {
+        update(tid, 'error', 'Transaction reverted on-chain.');
+      }
+    } catch (err) {
+      update(tid, 'error', err instanceof Error ? err.message : 'Finalize failed');
     }
-  }, [isSuccess]);
-
-  const handleFinalize = () => {
-    if (matchResult == null) return;
-    toast('loading', 'Finalizing deal...');
-    writeContract({
-      address: contractAddress,
-      abi: BLIND_DEAL_ABI,
-      functionName: 'clientFinalizeDeal',
-      args: [dealId, matchResult],
-    });
+    setIsConfirming(false);
   };
 
   return (
@@ -567,14 +635,6 @@ function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () 
         >
           {isPending ? 'Confirm in wallet...' : isConfirming ? 'Finalizing...' : 'Finalize Deal'}
         </button>
-      )}
-
-      {writeError && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-          <p className="text-sm text-red-400">
-            {writeError.message.split('\n')[0]}
-          </p>
-        </div>
       )}
     </div>
   );
@@ -626,6 +686,21 @@ function ExpireSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () =>
         {isPending ? 'Confirm...' : isConfirming ? 'Expiring...' : 'Expire Deal (Past Deadline)'}
       </button>
     </div>
+  );
+}
+
+// ── Switch to Arbitrum Sepolia button ───────────────────────────────
+
+function SwitchToArbButton({ chainId }: { chainId: number }) {
+  const { switchChain } = useSwitchChain();
+  if (chainId === 421614) return null;
+  return (
+    <button
+      onClick={() => switchChain({ chainId: 421614 })}
+      className="w-full py-2.5 text-sm text-indigo-400 border border-indigo-500/20 rounded-xl hover:bg-indigo-500/10 transition-colors"
+    >
+      Switch to Arbitrum Sepolia for settlement
+    </button>
   );
 }
 
@@ -699,12 +774,12 @@ function MatchedSection({
   const [cctpAttestation, setCctpAttestation] = useState<string | null>(null);
 
   // Check if escrow is linked to resolver
-  const { data: isRegistered } = useReadContract({
+  const { data: isRegistered, refetch: refetchRegistered } = useReadContract({
     address: resolverAddress,
     abi: RESOLVER_ABI,
     functionName: 'registered',
     args: escrowId != null ? [escrowId] : undefined,
-    query: { enabled: escrowId != null && !!resolverAddress },
+    query: { enabled: escrowId != null && !!resolverAddress, refetchInterval: 10000 },
   });
 
   // Check if condition is met
@@ -717,6 +792,7 @@ function MatchedSection({
   });
 
   // Poll escrow funding status via EscrowFunded events (every 10s)
+  // Only upgrades status, never downgrades
   useEffect(() => {
     if (!publicClient || escrowId == null || !escrowAddress) return;
     let cancelled = false;
@@ -732,45 +808,22 @@ function MatchedSection({
         });
         if (cancelled) return;
         if (events.length > 0) {
-          setEscrowStatus('funded');
-        } else if (isRegistered === true) {
-          setEscrowStatus('linked');
-        } else if (isRegistered === false) {
-          setEscrowStatus('created');
+          setEscrowStatus((prev) => prev !== 'redeemed' ? 'funded' : prev);
         }
-        // If isRegistered is undefined, don't change status (still loading)
       } catch {
-        // On error, don't downgrade status
+        // On error, don't change status
       }
     };
 
     check();
     const interval = setInterval(check, 10000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [publicClient, escrowId, escrowAddress, isRegistered]);
+  }, [publicClient, escrowId, escrowAddress]);
 
   // Link escrow to resolver tx
-  const { writeContract: writeLinkEscrow, data: linkTxHash } = useWriteContract();
-  const { isSuccess: linkSuccess } = useWaitForTransactionReceipt({ hash: linkTxHash });
+  const { writeContractAsync: writeLinkEscrowAsync } = useWriteContract();
 
-  useEffect(() => {
-    if (linkSuccess) {
-      setEscrowStatus('linked');
-      toast('success', 'Escrow linked to condition resolver');
-    }
-  }, [linkSuccess]);
-
-  // Redeem escrow TX
-  const { writeContract: writeRedeemEscrow, data: redeemTxHash } = useWriteContract();
-  const { isSuccess: redeemSuccess } = useWaitForTransactionReceipt({ hash: redeemTxHash });
-
-  useEffect(() => {
-    if (redeemSuccess) {
-      setEscrowStatus('redeemed');
-      setIsProcessing(false);
-      toast('success', 'Escrow redeemed! Settlement complete.');
-    }
-  }, [redeemSuccess]);
+  // Redeem is handled by API (Reineira SDK)
 
   // ── Handlers ──────────────────────────────────────────────────────
 
@@ -792,9 +845,7 @@ function MatchedSection({
       });
 
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'API request failed');
-      }
+      if (!response.ok) throw new Error(data.error || 'API request failed');
 
       if (data.escrow_id != null) {
         const newEscrowId = BigInt(data.escrow_id);
@@ -804,7 +855,7 @@ function MatchedSection({
         setIsProcessing(false);
         update(tid, 'success', `Escrow #${newEscrowId} created`);
       } else {
-        update(tid, 'info', `Escrow created (tx: ${data.tx_hash?.slice(0, 14)}...) — check Arbiscan for ID`);
+        update(tid, 'info', `Escrow created (tx: ${data.tx_hash?.slice(0,14)}...)`);
         setIsProcessing(false);
       }
     } catch (err) {
@@ -815,17 +866,34 @@ function MatchedSection({
     }
   };
 
-  const handleLinkEscrow = () => {
-    if (escrowId == null || !resolverAddress) return;
+  const handleLinkEscrow = async () => {
+    if (escrowId == null || !resolverAddress || !publicClient) return;
     setIsProcessing(true);
     setEscrowStatus('linking');
-    toast('loading', 'Linking escrow to deal condition...');
-    writeLinkEscrow({
-      address: resolverAddress,
-      abi: RESOLVER_ABI,
-      functionName: 'linkEscrow',
-      args: [escrowId, dealId],
-    });
+    const tid = toast('loading', 'Linking escrow to deal condition...');
+    try {
+      const hash = await writeLinkEscrowAsync({
+        address: resolverAddress,
+        abi: RESOLVER_ABI,
+        functionName: 'linkEscrow',
+        args: [escrowId, dealId],
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status === 'success') {
+        setEscrowStatus('linked');
+        setIsProcessing(false);
+        update(tid, 'success', 'Escrow linked to condition resolver');
+        refetchRegistered();
+      } else {
+        setEscrowStatus('created');
+        setIsProcessing(false);
+        update(tid, 'error', 'Link transaction reverted');
+      }
+    } catch (err) {
+      setEscrowStatus('created');
+      setIsProcessing(false);
+      update(tid, 'error', err instanceof Error ? err.message : 'Link failed');
+    }
   };
 
   const handleFundEscrow = async () => {
@@ -833,46 +901,26 @@ function MatchedSection({
     setIsProcessing(true);
     setEscrowError(null);
 
+    // Cross-chain flow kept as-is
     if (fundMode === 'cross-chain') {
+      const usdcAmount = BigInt(unsealedPrice.toString()) * 10n ** 6n;
       const tid = toast('loading', 'Starting CCTP cross-chain bridge...');
       try {
         const ethereum = (window as any).ethereum;
         if (!ethereum) throw new Error('No wallet detected');
-
-        // Switch to Ethereum Sepolia
-        await ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0xaa36a7' }], // 11155111
-        });
-
-        const ethWalletClient = createWalletClient({
-          account: userAddress!,
-          chain: sepolia,
-          transport: custom(ethereum),
-        });
-
-        const arbPublicClient = publicClient; // Current public client should be on Arb Sepolia
-        if (!arbPublicClient) throw new Error('Arbitrum public client not available');
-
+        await ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xaa36a7' }] });
+        const ethWalletClient = createWalletClient({ account: userAddress!, chain: sepolia, transport: custom(ethereum) });
         setCctpProgress('Approving USDC on Ethereum Sepolia...');
         const { messageBytes, attestation } = await bridgeUSDCViaCCTP({
-          amount: BigInt(unsealedPrice) * 10n ** 6n, // USDC 6 decimals
-          recipient: userAddress!,
-          ethWalletClient,
-          arbPublicClient,
-          onProgress: (p) => setCctpProgress(p.message ?? null),
+          amount: usdcAmount, recipient: userAddress!, ethWalletClient,
+          arbPublicClient: publicClient!, onProgress: (p) => setCctpProgress(p.message ?? null),
         });
-
-        setCctpMessageBytes(messageBytes);
-        setCctpAttestation(attestation);
-        setCctpProgress('USDC bridged! Switch to Arbitrum Sepolia and click "Complete Mint".');
+        setCctpMessageBytes(messageBytes); setCctpAttestation(attestation);
         update(tid, 'success', 'CCTP burn complete. Complete mint on Arbitrum.');
         setIsProcessing(false);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'CCTP bridge failed';
-        setEscrowError(msg);
-        setCctpProgress(null);
-        update(tid, 'error', msg);
+        setEscrowError(err instanceof Error ? err.message : 'CCTP bridge failed');
+        update(tid, 'error', err instanceof Error ? err.message : 'CCTP');
         setIsProcessing(false);
       }
       return;
@@ -883,20 +931,16 @@ function MatchedSection({
       const response = await fetch('/api/escrow/fund', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          escrowId: escrowId.toString(),
-          amount: Number(unsealedPrice),
-        }),
+        body: JSON.stringify({ escrowId: escrowId.toString(), amount: Number(unsealedPrice) }),
       });
-
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Fund request failed');
-      }
-
+      if (!response.ok) throw new Error(data.error || 'Fund request failed');
       setEscrowStatus('funded');
       setIsProcessing(false);
-      update(tid, 'success', `Escrow funded (tx: ${data.tx_hash?.slice(0, 14)}...)`);
+      update(tid, 'success', data.simulated
+        ? `Escrow funded (testnet simulation — on-chain pending)`
+        : `Escrow funded${data.tx_hash ? ` (tx: ${data.tx_hash.slice(0,14)}...)` : ''}`
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fund escrow';
       setEscrowError(msg);
@@ -952,14 +996,28 @@ function MatchedSection({
     }
     setIsProcessing(true);
     setEscrowError(null);
-    toast('loading', 'Confirm redemption in wallet...');
+    const tid = toast('loading', 'Redeeming escrow via Privara...');
 
-    writeRedeemEscrow({
-      address: escrowAddress,
-      abi: ESCROW_ABI,
-      functionName: 'redeem',
-      args: [escrowId],
-    });
+    try {
+      const response = await fetch('/api/escrow/redeem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ escrowId: escrowId.toString() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Redeem failed');
+      setEscrowStatus('redeemed');
+      setIsProcessing(false);
+      toast('success', data.simulated
+        ? 'Escrow redeemed (testnet simulation). Settlement complete!'
+        : 'Escrow redeemed! Settlement complete.'
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Redeem failed';
+      setEscrowError(msg);
+      update(tid, 'error', msg);
+      setIsProcessing(false);
+    }
   };
 
   // Settlement progress steps
@@ -1028,18 +1086,34 @@ function MatchedSection({
           {/* Step 1: Create escrow (buyer) */}
           {escrowId == null && isBuyer && (
             <>
-              <button
-                onClick={handleCreateEscrow}
-                disabled={isProcessing || !escrowAddress || !cofheConnection.connected}
-                className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-medium rounded-xl hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-600/20"
-              >
-                {!cofheConnection.connected ? 'Connecting FHE...' : isProcessing ? 'Creating...' : `Create Escrow — ${unsealedPrice} USDC`}
-              </button>
+              {!escrowAddress ? (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-xs text-amber-400 mb-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="font-medium">Escrow not available on Ethereum Sepolia</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    The Privara escrow settlement is deployed on <strong className="text-slate-300">Arbitrum Sepolia</strong>.
+                    The deal and FHE resolution can still be finalized on this chain, but on-chain settlement requires Arbitrum.
+                  </p>
+                  <SwitchToArbButton chainId={chainId} />
+                </div>
+              ) : (
+                <button
+                  onClick={handleCreateEscrow}
+                  disabled={isProcessing || !cofheConnection.connected}
+                  className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-medium rounded-xl hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-600/20"
+                >
+                  {!cofheConnection.connected ? 'Connecting FHE...' : isProcessing ? 'Creating...' : `Create Escrow — ${unsealedPrice} USDC`}
+                </button>
+              )}
             </>
           )}
 
           {/* Step 2: Link to condition resolver (buyer) */}
-          {escrowId != null && escrowStatus === 'created' && isBuyer && resolverAddress && (
+          {escrowId != null && isBuyer && resolverAddress && escrowStatus === 'created' && (
             <button
               onClick={handleLinkEscrow}
               disabled={isProcessing}
@@ -1049,7 +1123,15 @@ function MatchedSection({
             </button>
           )}
 
-          {/* Step 3: Fund escrow (buyer) */}
+          {/* Linking spinner */}
+          {escrowId != null && escrowStatus === 'linking' && (
+            <div className="flex items-center justify-center gap-2 py-3">
+              <div className="w-4 h-4 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+              <span className="text-sm text-amber-400">Linking escrow to deal...</span>
+            </div>
+          )}
+
+          {/* Step 3: Fund escrow (buyer) — only after link confirmed */}
           {escrowId != null && escrowStatus === 'linked' && isBuyer && (
             <div className="space-y-3">
               <div className="flex gap-2">

@@ -153,8 +153,14 @@ contract BlindDeal {
         // Allow global decryption of match result
         FHE.allowGlobal(d.isMatch);
 
-        // Request decryption of match result for on-chain state transition
-        ITaskManager(TASK_MANAGER_ADDRESS).createDecryptTask(uint256(ebool.unwrap(d.isMatch)), address(this));
+        // Request decryption of match result for on-chain state transition.
+        // Not all testnet TASK_MANAGER instances support createDecryptTask yet.
+        // If it reverts, clientFinalizeDeal is still available as a fallback.
+        try ITaskManager(TASK_MANAGER_ADDRESS).createDecryptTask(uint256(ebool.unwrap(d.isMatch)), address(this)) {
+            // Task registered for threshold decryption
+        } catch {
+            // TASK_MANAGER doesn't support createDecryptTask — client-side finalize still works
+        }
 
         emit DealResolving(dealId);
     }

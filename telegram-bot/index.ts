@@ -28,8 +28,8 @@ const BLIND_DEAL_ABI = parseAbi([
 ] as const);
 
 const CONTRACTS: Record<number, `0x${string}`> = {
-  [arbitrumSepolia.id]: '0xCd587f1d57c24cff0D83c1A5f686D2d364114c55',
-  [sepolia.id]: '0xBe1F302cbfAbc88494e93E0ca28C44f614cc9EC6',
+  [arbitrumSepolia.id]: '0x802841705BF377a01C050E26a4488598001906C5',
+  [sepolia.id]: '0x049A114756edF01064861F40c4B6979d5eccAdE8',
 };
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://blinddeal.vercel.app';

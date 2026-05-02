@@ -5,6 +5,7 @@ import { sepolia, arbSepolia } from '@cofhe/sdk/chains';
 
 const cofheConfig = createCofheConfig({
   supportedChains: [sepolia, arbSepolia],
+  useWorkers: false,
 });
 
 /** Auto-creates a self permit when CoFHE is connected but no active permit exists. */
