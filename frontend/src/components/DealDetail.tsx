@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import {
   useAccount,
   useReadContracts,
@@ -447,7 +447,12 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
       update(tid, 'info', 'Confirm in your wallet...');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Encryption failed';
-      update(tid, 'error', msg);
+      // Permit expired — user needs to retry (next submit will get fresh permit)
+      if (msg.includes('Permit is expired') || msg.includes('permit')) {
+        update(tid, 'error', 'FHE permit expired. Please try submitting again — a fresh permit will be generated.');
+      } else {
+        update(tid, 'error', msg);
+      }
     }
   };
 
@@ -504,21 +509,31 @@ function SubmitPriceSection({ dealId, isBuyer, onSuccess }: { dealId: bigint; is
       {error && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-2">
           <p className="text-sm text-red-400">{error.message.split('\n')[0]}</p>
-          {!isNonRetryableError && (
+          {error.message.includes('Permit is expired') ? (
+            <p className="text-xs text-amber-400">
+              The FHE permit has expired. Please click "Submit" again — a fresh permit will be generated.
+            </p>
+          ) : !isNonRetryableError ? (
             <p className="text-xs text-slate-500">
               The transaction was reverted on-chain. This can happen if the FHE proof was not generated correctly.
               Try refreshing the page to reload the zk-proof worker, then submit again.
             </p>
-          )}
+          ) : null}
         </div>
       )}
 
       {txFailed && !isNonRetryableError && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-2">
           <p className="text-sm text-red-400">Transaction failed on-chain</p>
-          <p className="text-xs text-slate-500">
-            The encrypted proof was rejected by the contract. Try refreshing the page and submitting again.
-          </p>
+          {txErrorMsg.includes('Permit is expired') || txErrorMsg.includes('permit') ? (
+            <p className="text-xs text-amber-400">
+              The FHE permit has expired. Please click "Submit" again — a fresh permit will be generated.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500">
+              The encrypted proof was rejected by the contract. Try refreshing the page and submitting again.
+            </p>
+          )}
         </div>
       )}
     </form>
@@ -548,29 +563,64 @@ function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () 
   const [matchResult, setMatchResult] = useState<boolean | null>(null);
   const [decryptStatus, setDecryptStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [decryptError, setDecryptError] = useState<string | null>(null);
+  const [decryptRetryCount, setDecryptRetryCount] = useState(0);
+
+  // Create fresh permit before each decryption attempt (permits expire)
+  const createFreshPermit = useCallback(async () => {
+    if (!cofheClient || !cofheConnection.account) return;
+    try {
+      await cofheClient.permits.createSelf({
+        issuer: cofheConnection.account,
+        name: `BlindDeal decrypt ${Date.now()}`,
+      });
+      console.log('[BlindDeal] Fresh permit created for decryption');
+    } catch (err) {
+      console.warn('[BlindDeal] Failed to create fresh permit:', err);
+    }
+  }, [cofheClient, cofheConnection.account]);
 
   useEffect(() => {
     const handle = matchHandle as bigint | undefined;
-    if (!handle || handle === 0n || !cofheClient || !cofheConnection.connected || decryptStatus !== 'idle') return;
+    if (!handle || handle === 0n || !cofheClient || !cofheConnection.connected) return;
+    // Allow retry on error
+    if (decryptStatus !== 'idle' && decryptStatus !== 'error') return;
 
     let cancelled = false;
     setDecryptStatus('loading');
+    setDecryptError(null);
 
-    cofheClient
-      .decryptForView(handle, FheTypes.Bool)
-      .execute()
-      .then((val) => {
+    const delay = decryptRetryCount > 0 ? 1000 * Math.min(decryptRetryCount + 1, 3) * 1000 : 500;
+
+    const attempt = async () => {
+      if (cancelled) return;
+      // Create fresh permit before decryption (permits expire after ~30s)
+      await createFreshPermit();
+      if (cancelled) return;
+
+      try {
+        const val = await cofheClient
+          .decryptForView(handle, FheTypes.Bool)
+          .execute();
         if (!cancelled) { setMatchResult(!!val); setDecryptStatus('done'); }
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) {
-          setDecryptError(err instanceof Error ? err.message : 'Failed to decrypt match result');
+          const msg = err instanceof Error ? err.message : 'Failed to decrypt match result';
+          setDecryptError(msg);
           setDecryptStatus('error');
+          // Auto-retry on permit expiry
+          if (msg.includes('Permit is expired') && decryptRetryCount < 3) {
+            setTimeout(() => {
+              setDecryptStatus('idle');
+              setDecryptRetryCount(c => c + 1);
+            }, delay);
+          }
         }
-      });
+      }
+    };
 
-    return () => { cancelled = true; };
-  }, [matchHandle, cofheClient, cofheConnection.connected]);
+    const timer = setTimeout(attempt, delay);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [matchHandle, cofheClient, cofheConnection.connected, decryptRetryCount, createFreshPermit]);
 
   const handleFinalize = async () => {
     if (matchResult == null || !publicClient) return;
@@ -608,7 +658,9 @@ function FinalizeSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () 
           {decryptStatus === 'done'
             ? `CoFHE decryption complete — prices ${matchResult ? 'matched' : 'did not match'}. Ready to finalize.`
             : decryptStatus === 'error'
-              ? 'Could not decrypt match result. Retrying...'
+              ? decryptError?.includes('Permit is expired')
+                ? `Decryption failed — permit expired. ${decryptRetryCount > 0 ? 'Retrying...' : 'Please refresh the page.'}`
+                : 'Could not decrypt match result. Retrying...'
               : 'Both prices encrypted & submitted. Decrypting match result via CoFHE SDK...'}
         </p>
       </div>
