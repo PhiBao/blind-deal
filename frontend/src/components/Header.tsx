@@ -11,7 +11,7 @@ const CHAINS = [
 ] as const;
 
 interface HeaderProps {
-  onNavigate: (page: 'dashboard' | 'create') => void;
+  onNavigate: (page: 'dashboard' | 'create' | 'mcp') => void;
   currentPage: string;
 }
 
@@ -97,7 +97,7 @@ export function Header({ onNavigate, currentPage }: HeaderProps) {
             </span>
           </button>
 
-          <nav className="flex gap-1 ml-2">
+<nav className="flex gap-1 ml-2">
             <button
               onClick={() => onNavigate('dashboard')}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
@@ -117,6 +117,16 @@ export function Header({ onNavigate, currentPage }: HeaderProps) {
               }`}
             >
               + New
+            </button>
+            <button
+              onClick={() => onNavigate('mcp')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                currentPage === 'mcp'
+                  ? 'bg-white/10 text-white'
+                  : 'text-slate-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              MCP
             </button>
           </nav>
         </div>

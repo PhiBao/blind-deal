@@ -2,13 +2,13 @@ import { useChainId } from 'wagmi';
 
 // v5 contract addresses (redeployed May 2026 — createDecryptTask wrapped in try/catch)
 const CONTRACT_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0xabf1161bEcf179A4Cb6604387273931E1d76A65c', // Arbitrum Sepolia (v5)
-  11155111: '0xBed299e6e40233bD4Cac7bd472356F16e99EBf10', // Ethereum Sepolia (v5)
+  421614: '0x3254538efD1F186640daf059C6Ff35a08bf33995', // Arbitrum Sepolia (v5)
+  11155111: '0x36a155431C4525CEEdEB73A461372fB127A0Bd49', // Ethereum Sepolia (v5)
 };
 
 const RESOLVER_ADDRESSES: Record<number, `0x${string}`> = {
-  421614: '0x22480315309C85cdc2648cc6eD897ee96b755250', // Arbitrum Sepolia (v5)
-  11155111: '0x639794F956A4b2CC2C62a5DF9eE71B29a7C7a53E', // Ethereum Sepolia (v5)
+  421614: '0xBed299e6e40233bD4Cac7bd472356F16e99EBf10', // Arbitrum Sepolia (v5)
+  11155111: '0x976fE936F57DE1a6dB5bd97d90874B76876C137C', // Ethereum Sepolia (v5)
 };
 
 // Fallback for when no wallet is connected (e.g. read-only views)
@@ -49,12 +49,15 @@ export const RESOLVER_ABI = [
 export const BLIND_DEAL_ABI = [
   // Errors
   { inputs: [], name: 'AlreadySubmitted', type: 'error' },
+  { inputs: [], name: 'AlreadyJoined', type: 'error' },
   { inputs: [], name: 'DealExpired', type: 'error' },
+  { inputs: [], name: 'DealFull', type: 'error' },
   { inputs: [], name: 'DealNotExpired', type: 'error' },
   { inputs: [], name: 'DealNotOpen', type: 'error' },
   { inputs: [], name: 'DealNotResolved', type: 'error' },
   { inputs: [], name: 'InvalidDeadline', type: 'error' },
   { inputs: [], name: 'NotBuyer', type: 'error' },
+  { inputs: [], name: 'NotOpenDeal', type: 'error' },
   { inputs: [], name: 'NotParticipant', type: 'error' },
   { inputs: [], name: 'NotSeller', type: 'error' },
   { inputs: [], name: 'SelfDeal', type: 'error' },
@@ -69,6 +72,13 @@ export const BLIND_DEAL_ABI = [
       { indexed: true, name: 'seller', type: 'address' },
       { indexed: false, name: 'description', type: 'string' },
       { indexed: false, name: 'deadline', type: 'uint256' },
+    ],
+  },
+  {
+    anonymous: false, type: 'event', name: 'DealJoined',
+    inputs: [
+      { indexed: true, name: 'dealId', type: 'uint256' },
+      { indexed: true, name: 'seller', type: 'address' },
     ],
   },
   {
@@ -119,6 +129,10 @@ export const BLIND_DEAL_ABI = [
     stateMutability: 'view', type: 'function',
   },
   {
+    inputs: [{ name: 'dealId', type: 'uint256' }], name: 'getDealType',
+    outputs: [{ name: '', type: 'uint8' }], stateMutability: 'view', type: 'function',
+  },
+  {
     inputs: [{ name: 'dealId', type: 'uint256' }], name: 'getDealDescription',
     outputs: [{ name: '', type: 'string' }], stateMutability: 'view', type: 'function',
   },
@@ -162,6 +176,10 @@ export const BLIND_DEAL_ABI = [
     ],
     name: 'createDeal', outputs: [{ name: 'dealId', type: 'uint256' }],
     stateMutability: 'nonpayable', type: 'function',
+  },
+  {
+    inputs: [{ name: 'dealId', type: 'uint256' }],
+    name: 'joinDeal', outputs: [], stateMutability: 'nonpayable', type: 'function',
   },
   {
     inputs: [
@@ -220,6 +238,11 @@ export enum DealState {
   NoMatch = 2,
   Cancelled = 3,
   Expired = 4,
+}
+
+export enum DealType {
+  Direct = 0,
+  Open = 1,
 }
 
 export const DEAL_STATE_LABELS: Record<DealState, string> = {

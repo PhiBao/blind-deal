@@ -76,12 +76,20 @@ describe('BlindDeal', function () {
 			).to.be.revertedWithCustomError(blindDeal, 'SelfDeal')
 		})
 
-		it('Should reject zero address as seller', async function () {
+		it('Should allow zero address as seller (creates Open marketplace deal)', async function () {
 			const { blindDeal, buyer } = await loadFixture(deployBlindDealFixture)
 
-			await expect(
-				blindDeal.connect(buyer).createDeal('0x0000000000000000000000000000000000000000', 'Zero seller', 0),
-			).to.be.revertedWithCustomError(blindDeal, 'ZeroAddress')
+			await blindDeal.connect(buyer).createDeal('0x0000000000000000000000000000000000000000', 'Open marketplace deal', 0)
+
+			const state = await blindDeal.getDealState(0)
+			expect(state).to.equal(0) // Open
+
+			const dealType = await blindDeal.getDealType(0)
+			expect(dealType).to.equal(1) // Open
+
+			const parties = await blindDeal.getDealParties(0)
+			expect(parties.buyer).to.equal(buyer.address)
+			expect(parties.seller).to.equal('0x0000000000000000000000000000000000000000')
 		})
 
 		it('Should reject finalizeDeal before prices submitted', async function () {
@@ -353,6 +361,105 @@ describe('BlindDeal', function () {
 			const after = await time.latest()
 			expect(createdAt).to.be.gte(before)
 			expect(createdAt).to.be.lte(after)
+		})
+	})
+
+	describe('Open Marketplace — Join Deal', function () {
+		it('Should allow a third party to join an Open deal as seller', async function () {
+			const { blindDeal, buyer, seller } = await loadFixture(deployBlindDealFixture)
+
+			await blindDeal.connect(buyer).createDeal(ethers.ZeroAddress, 'Open deal', 0)
+
+			await blindDeal.connect(seller).joinDeal(0)
+
+			const parties = await blindDeal.getDealParties(0)
+			expect(parties.seller).to.equal(seller.address)
+		})
+
+		it('Should reject joinDeal on Direct deal', async function () {
+			const { blindDeal, buyer, seller } = await loadFixture(deployBlindDealFixture)
+			const [, , thirdParty] = await ethers.getSigners()
+
+			await blindDeal.connect(buyer).createDeal(seller.address, 'Direct deal', 0)
+
+			await expect(
+				blindDeal.connect(thirdParty).joinDeal(0),
+			).to.be.revertedWithCustomError(blindDeal, 'NotOpenDeal')
+		})
+
+		it('Should reject joinDeal if already joined', async function () {
+			const { blindDeal, buyer, seller } = await loadFixture(deployBlindDealFixture)
+			const [, , thirdParty] = await ethers.getSigners()
+
+			await blindDeal.connect(buyer).createDeal(ethers.ZeroAddress, 'Open deal', 0)
+			await blindDeal.connect(seller).joinDeal(0)
+
+			await expect(
+				blindDeal.connect(thirdParty).joinDeal(0),
+			).to.be.revertedWithCustomError(blindDeal, 'DealFull')
+		})
+
+		it('Should reject buyer from joining their own deal', async function () {
+			const { blindDeal, buyer } = await loadFixture(deployBlindDealFixture)
+
+			await blindDeal.connect(buyer).createDeal(ethers.ZeroAddress, 'Open deal', 0)
+
+			await expect(
+				blindDeal.connect(buyer).joinDeal(0),
+			).to.be.revertedWithCustomError(blindDeal, 'SelfDeal')
+		})
+
+		it('Should reject submitSellerPrice before seller joins', async function () {
+			const { blindDeal, buyer, seller } = await loadFixture(deployBlindDealFixture)
+
+			await blindDeal.connect(buyer).createDeal(ethers.ZeroAddress, 'Open deal', 0)
+
+			await expect(
+				blindDeal.connect(seller).submitSellerPrice(0, { ctHash: 0, securityZone: 0, utype: 0, signature: '0x' }),
+			).to.be.revertedWithCustomError(blindDeal, 'DealFull')
+		})
+
+		it('Full Open deal flow: create → join → submit prices → resolve', async function () {
+			const { blindDeal, buyer, seller } = await loadFixture(deployBlindDealFixture)
+
+			// Create Open deal
+			await blindDeal.connect(buyer).createDeal(ethers.ZeroAddress, 'Full flow test', 0)
+
+			const dealType = await blindDeal.getDealType(0)
+			expect(dealType).to.equal(1) // Open
+
+			// Third party joins as seller
+			await blindDeal.connect(seller).joinDeal(0)
+
+			const parties = await blindDeal.getDealParties(0)
+			expect(parties.seller).to.equal(seller.address)
+
+			// Both submit prices
+			const client = await hre.cofhe.createClientWithBatteries(buyer)
+			const [enc] = await client.encryptInputs([Encryptable.uint64(1000n)]).execute()
+
+			await blindDeal.connect(buyer).submitBuyerPrice(0, enc)
+
+			const client2 = await hre.cofhe.createClientWithBatteries(seller)
+			const [enc2] = await client2.encryptInputs([Encryptable.uint64(800n)]).execute()
+
+			await blindDeal.connect(seller).submitSellerPrice(0, enc2)
+
+			// Verify both submitted
+			const [buyerDone, sellerDone] = await blindDeal.isDealSubmitted(0)
+			expect(buyerDone).to.be.true
+			expect(sellerDone).to.be.true
+		})
+
+		it('Should allow buyer to cancel Open deal before seller joins', async function () {
+			const { blindDeal, buyer } = await loadFixture(deployBlindDealFixture)
+
+			await blindDeal.connect(buyer).createDeal(ethers.ZeroAddress, 'Open cancel test', 0)
+
+			await blindDeal.connect(buyer).cancelDeal(0)
+
+			const state = await blindDeal.getDealState(0)
+			expect(state).to.equal(3) // Cancelled
 		})
 	})
 })

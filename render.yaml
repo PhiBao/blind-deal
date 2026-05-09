@@ -1,0 +1,27 @@
+# render.yaml - BlindDeal Background Worker
+# Deploy: https://render.com/deploy?repo=https://github.com/YOUR_USERNAME/blinddeal
+
+services:
+  - type: worker
+    name: blinddeal-bot
+    env: node
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: pnpm install --frozen-lockfile
+    startCommand: npx tsx start-bot.ts all
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ARBITRUM_SEPOLIA_RPC_URL
+        sync: false
+      - key: SEPOLIA_RPC_URL
+        sync: false
+      - key: PRIVATE_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://blinddeal.vercel.app
+      - key: MCP_PORT
+        value: "3001"

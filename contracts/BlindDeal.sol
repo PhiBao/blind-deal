@@ -16,9 +16,15 @@ contract BlindDeal {
         Expired     // Past deadline without resolution
     }
 
+    enum DealType {
+        Direct,     // Specific seller address required
+        Open        // Anyone can join as seller (marketplace)
+    }
+
     struct Deal {
         address buyer;
         address seller;
+        DealType dealType;
         euint64 buyerMax;
         euint64 sellerMin;
         euint64 dealPrice;
@@ -40,6 +46,7 @@ contract BlindDeal {
 
     // ── Events ──────────────────────────────────────────────────────────
     event DealCreated(uint256 indexed dealId, address indexed buyer, address indexed seller, string description, uint256 deadline);
+    event DealJoined(uint256 indexed dealId, address indexed seller);
     event PriceSubmitted(uint256 indexed dealId, address indexed party);
     event DealResolving(uint256 indexed dealId);
     event DealResolved(uint256 indexed dealId, DealState state);
@@ -59,13 +66,15 @@ contract BlindDeal {
     error SelfDeal();
     error ZeroAddress();
     error DeadlineTooLong();
+    error NotOpenDeal();
+    error AlreadyJoined();
+    error DealFull();
 
     // ── Create a new negotiation ────────────────────────────────────────
-    /// @param _seller The counterparty's address
+    /// @param _seller The counterparty's address (address(0) for open marketplace deals)
     /// @param _description Human-readable context for the deal
     /// @param _duration Seconds until deal expires (0 = no deadline)
     function createDeal(address _seller, string calldata _description, uint256 _duration) external returns (uint256 dealId) {
-        if (_seller == address(0)) revert ZeroAddress();
         if (_seller == msg.sender) revert SelfDeal();
         if (_duration > MAX_DEADLINE_DURATION) revert DeadlineTooLong();
 
@@ -73,15 +82,34 @@ contract BlindDeal {
         Deal storage d = deals[dealId];
         d.buyer = msg.sender;
         d.seller = _seller;
+        d.dealType = _seller == address(0) ? DealType.Open : DealType.Direct;
         d.state = DealState.Open;
         d.description = _description;
         d.deadline = _duration > 0 ? block.timestamp + _duration : 0;
         d.createdAt = block.timestamp;
 
         userDeals[msg.sender].push(dealId);
-        userDeals[_seller].push(dealId);
+        if (_seller != address(0)) {
+            userDeals[_seller].push(dealId);
+        }
 
         emit DealCreated(dealId, msg.sender, _seller, _description, d.deadline);
+    }
+
+    // ── Join an open marketplace deal ───────────────────────────────────
+
+    /// @notice Seller joins an open deal (first come, first served)
+    function joinDeal(uint256 dealId) external {
+        Deal storage d = deals[dealId];
+        if (d.state != DealState.Open) revert DealNotOpen();
+        if (d.dealType != DealType.Open) revert NotOpenDeal();
+        if (d.seller != address(0)) revert DealFull();
+        if (msg.sender == d.buyer) revert SelfDeal();
+
+        d.seller = msg.sender;
+        userDeals[msg.sender].push(dealId);
+
+        emit DealJoined(dealId, msg.sender);
     }
 
     // ── Submit encrypted prices ─────────────────────────────────────────
@@ -110,6 +138,7 @@ contract BlindDeal {
         Deal storage d = deals[dealId];
         if (d.state != DealState.Open) revert DealNotOpen();
         if (d.deadline > 0 && block.timestamp > d.deadline) revert DealDeadlinePassed();
+        if (d.seller == address(0)) revert DealFull();
         if (msg.sender != d.seller) revert NotSeller();
         if (d.sellerSubmitted) revert AlreadySubmitted();
 
@@ -208,11 +237,19 @@ contract BlindDeal {
 
     // ── Cancel ──────────────────────────────────────────────────────────
 
-    /// @notice Either party can cancel before both prices are submitted
+    /// @notice Either party can cancel before both prices are submitted.
+    ///         Buyer can cancel an Open deal even before a seller joins.
     function cancelDeal(uint256 dealId) external {
         Deal storage d = deals[dealId];
         if (d.state != DealState.Open) revert DealNotOpen();
-        if (msg.sender != d.buyer && msg.sender != d.seller) revert NotParticipant();
+
+        if (d.dealType == DealType.Open && d.seller == address(0)) {
+            // Open deal with no seller joined — buyer can cancel alone
+            if (msg.sender != d.buyer) revert NotBuyer();
+        } else {
+            if (msg.sender != d.buyer && msg.sender != d.seller) revert NotParticipant();
+        }
+
         // Can only cancel before resolution starts
         require(!d.buyerSubmitted || !d.sellerSubmitted, "Already resolving");
 
@@ -240,6 +277,10 @@ contract BlindDeal {
 
     function getDealParties(uint256 dealId) external view returns (address buyer, address seller) {
         return (deals[dealId].buyer, deals[dealId].seller);
+    }
+
+    function getDealType(uint256 dealId) external view returns (DealType) {
+        return deals[dealId].dealType;
     }
 
     function getDealDescription(uint256 dealId) external view returns (string memory) {

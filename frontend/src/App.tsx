@@ -8,12 +8,13 @@ import { Header } from './components/Header';
 import { Dashboard } from './components/Dashboard';
 import { CreateDeal } from './components/CreateDeal';
 import { DealDetail } from './components/DealDetail';
+import { MCPServer } from './components/MCPServer';
 import { DealToastContext } from './components/DealDetail';
 import { useToast, ToastContainer } from './components/Toast';
 
 const queryClient = new QueryClient();
 
-export type View = { page: 'dashboard' } | { page: 'create' } | { page: 'deal'; dealId: bigint };
+export type View = { page: 'dashboard' } | { page: 'create' } | { page: 'deal'; dealId: bigint } | { page: 'mcp' };
 
 const SUPPORTED_CHAIN_IDS: number[] = [arbitrumSepolia.id, sepolia.id];
 
@@ -113,29 +114,34 @@ function AppContent() {
   const [view, setView] = useState<View>({ page: 'dashboard' });
   const { toasts, toast, update, dismiss } = useToast();
 
-  // Deep-link: ?deal=123 opens that deal directly
+  // Deep-link: ?deal=123 opens that deal, ?action=mcp opens MCP page
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const dealParam = params.get('deal');
+    const action = params.get('action');
     if (dealParam) {
       try {
         setView({ page: 'deal', dealId: BigInt(dealParam) });
       } catch {}
+    } else if (action === 'mcp') {
+      setView({ page: 'mcp' });
     }
   }, []);
 
   // Sync URL with current view for refresh persistence
   useEffect(() => {
+    const url = new URL(window.location.href);
     if (view.page === 'deal' && view.dealId != null) {
-      const url = new URL(window.location.href);
       url.searchParams.set('deal', view.dealId.toString());
-      window.history.replaceState({}, '', url.toString());
-    } else {
-      const url = new URL(window.location.href);
+      url.searchParams.delete('action');
+    } else if (view.page === 'mcp') {
+      url.searchParams.set('action', 'mcp');
       url.searchParams.delete('deal');
-      url.searchParams.delete('chain');
-      window.history.replaceState({}, '', url.toString());
+    } else {
+      url.searchParams.delete('deal');
+      url.searchParams.delete('action');
     }
+    window.history.replaceState({}, '', url.toString());
   }, [view]);
 
   return (
@@ -167,6 +173,12 @@ function AppContent() {
                 key={`deal-${view.dealId?.toString()}`}
                 dealId={view.dealId}
                 onBack={() => setView({ page: 'dashboard' })}
+              />
+            )}
+            {view.page === 'mcp' && (
+              <MCPServer
+                onNavigate={(page) => setView({ page } as View)}
+                currentPage={view.page}
               />
             )}
           </main>

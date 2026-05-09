@@ -340,7 +340,7 @@ The complete escrow lifecycle has been verified on Arbitrum Sepolia:
 ```
 blinddeal/
 ├── contracts/
-│   ├── BlindDeal.sol              # Core FHE negotiation
+│   ├── BlindDeal.sol              # Core FHE negotiation (v6: DealType, joinDeal)
 │   └── BlindDealResolver.sol      # Privara escrow condition resolver
 ├── frontend/
 │   ├── api/escrow/
@@ -349,25 +349,31 @@ blinddeal/
 │   │   └── redeem.ts             # Vercel API: redeem escrow (viem direct call)
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── CreateDeal.tsx      # Deal creation form
-│   │   │   ├── Dashboard.tsx       # My Deals + Marketplace tabs
-│   │   │   ├── DealDetail.tsx      # Full lifecycle: negotiate → settle
+│   │   │   ├── CreateDeal.tsx      # Deal creation form (Direct/Open toggle)
+│   │   │   ├── Dashboard.tsx       # My Deals + Marketplace tabs + activity tags
+│   │   │   │   ├── MCPServer.tsx    # MCP tools test panel
+│   │   │   ├── DealDetail.tsx      # Full lifecycle: negotiate → settle → cancel
 │   │   │   ├── Header.tsx          # Navigation + wallet connection
 │   │   │   └── Toast.tsx           # Notification system
 │   │   ├── config/
 │   │   │   ├── cofhe.tsx           # CoFHE SDK provider setup
-│   │   │   ├── contract.ts         # ABIs, addresses, escrow config (v5)
+│   │   │   ├── contract.ts         # ABIs, addresses, escrow config
 │   │   │   └── wagmi.ts            # Wagmi + chain configuration
 │   │   └── hooks/
 │   │       └── useEscrow.ts        # Escrow state + tx hash persistence (localStorage)
 │   ├── dev-api.mjs                 # Local dev API server (port 3002, viem)
 │   └── vite.config.ts              # Custom CoFHE worker plugin
 ├── telegram-bot/
-│   ├── index.ts                    # Telegram bot: notifications + share links
-│   └── package.json                # Bot dependencies
+│   ├── index.ts                    # Telegram bot: notifications + /list /subscribe + event polling
+│   └── package.json
+├── mcp-server/
+│   └── index.ts                    # MCP server (HTTP transport, Node.js CJS workaround)
+├── start-bot.ts                    # Multi-service runner: MCP + Telegram as child processes
+├── Procfile                        # Render worker: npx tsx start-bot.ts all
+├── render.yaml                    # Render Background Worker deployment config
+├── tasks/                          # Hardhat tasks (deploy, create, submit, finalize, verify, agent)
 ├── test/
-│   └── BlindDeal.test.ts           # 27 tests (all passing)
-├── tasks/                          # Hardhat tasks (deploy, create, submit, finalize, verify)
+│   └── BlindDeal.test.ts           # 34 tests (all passing, 7 new Open marketplace tests)
 ├── deployments/                    # Contract addresses per network
 ├── hardhat.config.ts
 └── package.json
@@ -411,13 +417,19 @@ pnpm arb-sepolia:deploy-blinddeal
 pnpm arb-sepolia:deploy-resolver
 ```
 
-### Run Frontend
+### Run Frontend + Services
 
 ```bash
 # Terminal 1: API server (escrow operations via Privara SDK)
 cd frontend && pnpm dev:api
 
-# Terminal 2: Vite dev server (proxies /api → port 3002)
+# Terminal 2: Telegram bot (long-running)
+pnpm start:bot telegram
+
+# Terminal 3: MCP server (long-running)
+pnpm mcp
+
+# Terminal 4: Vite dev server
 cd frontend && pnpm dev
 ```
 
@@ -435,6 +447,10 @@ npx hardhat deploy-blinddeal --network arb-sepolia
 npx hardhat create-deal --network arb-sepolia \
   --seller 0xSellerAddress --description "Logo design"
 
+# Create an Open marketplace deal (anyone can join)
+npx hardhat create-deal --network arb-sepolia \
+  --seller 0x0000000000000000000000000000000000000000 --description "Open deal"
+
 # Submit encrypted prices
 npx hardhat submit-price --network arb-sepolia \
   --deal 0 --price 1000 --role buyer
@@ -444,13 +460,48 @@ npx hardhat submit-price --network arb-sepolia \
 
 # Finalize
 npx hardhat finalize-deal --network arb-sepolia --deal 0
+
+# AI Agent: discover deals, join, submit price (demo command)
+npx hardhat agent --price 500 --network arb-sepolia
+
+# AI Agent: create Open deal + full flow demo
+npx hardhat agent --mode full --price 500 --network arb-sepolia
+```
+
+---
+
+## AI Agent
+
+The agent autonomously discovers open marketplace deals, joins as a seller, and submits FHE-encrypted prices — all from the command line.
+
+### How it works
+
+1. **Discovers deals** — scans the contract for Open marketplace deals without a seller
+2. **Joins as seller** — calls `joinDeal()` (first-come-first-served)
+3. **Encrypts price** — uses `@cofhe/hardhat-plugin` for FHE encryption (runs in Node.js)
+4. **Submits price** — calls `submitSellerPrice()` with encrypted input
+5. **Finalizes** — decrypts match result and calls `finalizeDeal()`
+
+### Demo commands
+
+```bash
+# Discover + join + submit (finds an Open deal automatically)
+npx hardhat agent --price 500 --network arb-sepolia
+
+# Full demo: create deal + join + submit buyer + submit seller + finalize
+npx hardhat agent --mode full --price 500 --network arb-sepolia
+
+# Create an Open deal for others to discover
+npx hardhat create-deal --network arb-sepolia \
+  --seller 0x0000000000000000000000000000000000000000 \
+  --description "Open negotiation"
 ```
 
 ---
 
 ## Tests
 
-27 tests across 6 categories using mock FHE (`@cofhe/hardhat-plugin`):
+34 tests across 7 categories using mock FHE (`@cofhe/hardhat-plugin`):
 
 | Category | Tests | What's Verified |
 |----------|-------|-----------------|
@@ -460,6 +511,7 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 | **No Match** | 2 | FHE no-match, price privacy (revert on getDealPrice) |
 | **Cancellation** | 4 | Buyer/seller cancel, outsider rejection, post-cancel rejection |
 | **Deal Expiry** | 4 | Deadline enforcement, early expire rejection |
+| **Open Marketplace** | 7 | joinDeal flow, Direct deal rejection, seller replacement, full Open deal lifecycle |
 
 ---
 
@@ -469,7 +521,7 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 
 - [x] `BlindDeal.sol` — FHE negotiation with 6 encrypted operations
 - [x] ACL-based access control, deal deadlines, per-user tracking
-- [x] 27 tests covering all paths
+- [x] 34 tests covering all paths
 - [x] Hardhat tasks + deployed to Arbitrum Sepolia & Ethereum Sepolia
 
 ### Wave 2 — Frontend + Escrow Settlement ✅
@@ -497,11 +549,26 @@ npx hardhat finalize-deal --network arb-sepolia --deal 0
 - [x] **Explorer links** — Fund/redeem tx hashes link to `sepolia.arbiscan.io`
 - [x] **CCTP bridge removed** — Was irrelevant (bridges regular USDC, escrow needs ConfUSDC)
 - [x] **Contract verification tasks** — `verify-blinddeal` and `verify-resolver` Hardhat tasks
-### Wave 4 — Multi-Deal Marketplace (Apr 21–May 10)
 
-- [ ] Multi-deal marketplace: browse open deals, deal history
-- [ ] Bid from Telegram: `/create`, `/submit <price>`, `/status <dealId>` commands
-- [ ] Deep-link Telegram → frontend for wallet signing flows
+### Wave 4 — Marketplace + Telegram Bot + MCP Server ✅
+
+- [x] **Open marketplace deals** — `createDeal(address(0))` → `DealType.Open`, first-come-first-served via `joinDeal()`
+- [x] **Open deal UI** — Seller card shows "Waiting for seller...", "Join as Seller" button, activity tags
+- [x] **Marketplace view** — Search/filter by state, search by deal ID, "Load More" pagination, "Open for sellers" badge
+- [x] **Telegram bot** — `/list`, `/status`, `/create`, `/submit`, `/share`, `/subscribe`, event polling every 15s
+- [x] **Telegram deep-links** — `?action=create`, `?deal=X&action=submit`, `?action=mcp` from App.tsx
+- [x] **MCP Server** — HTTP transport, 6 tools (`get_deal`, `list_deals`, `get_user_deals`, `get_events`, `subscribe_deal`, `create_deal`), 6 resources (`blinddeal://contract/*`, etc.)
+- [x] **MCP page** — Interactive test buttons, Claude Desktop config guide, tool/resource listings
+- [x] **Multi-service runner** — `start-bot.ts` spawns MCP + Telegram as child processes with auto-restart
+- [x] **AI Agent task** — `npx hardhat agent --price 500 --network arb-sepolia` discovers Open deals, joins, submits FHE price
+- [x] **34 Hardhat tests pass**, TypeScript clean, Vite build succeeds
+
+### Wave 5
+
+- [ ] MCP client integration — "Connect Agent" panel on `/mcp` page, test Claude Desktop connection
+- [ ] Landing page — `/` page with protocol explanation + wallet CTA
+- [ ] Browser push notifications — deal state changes in-browser (not just Telegram)
+- [ ] On-chain reputation — track per-address deal completion rate, show on deal cards
 
 ### Wave 5 — Agent + Advanced Features (May 11–Jun 1)
 

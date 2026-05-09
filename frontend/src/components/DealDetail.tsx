@@ -81,6 +81,7 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealDescription', args: [dealId] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'isDealSubmitted', args: [dealId] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealDeadline', args: [dealId] },
+      { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealType', args: [dealId] },
     ],
     query: {
       refetchInterval: 10000,
@@ -94,7 +95,7 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
   });
 
   // Validate all contract results before rendering
-  const allSuccess = results != null && results.length === 5 && results.every((r) => r != null && r.status === 'success');
+  const allSuccess = results != null && results.length === 6 && results.every((r) => r != null && r.status === 'success');
   const hasErrors = isContractsError || (results != null && results.some((r) => r != null && r.status === 'failure'));
 
   if (!address || !allSuccess) {
@@ -135,11 +136,15 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
   const description = results[2].result as string;
   const [buyerDone, sellerDone] = results[3].result as [boolean, boolean];
   const deadline = results[4].result as bigint;
+  const dealType = results[5].result as number; // 0 = Direct, 1 = Open
 
+  const isOpenDeal = dealType === 1;
+  const isSellerJoined = seller !== '0x0000000000000000000000000000000000000000';
   const isBuyer = address?.toLowerCase() === buyer.toLowerCase();
-  const isSeller = address?.toLowerCase() === seller.toLowerCase();
+  const isSeller = isSellerJoined && address?.toLowerCase() === seller.toLowerCase();
   const isParticipant = isBuyer || isSeller;
-  const role = isBuyer ? 'Buyer' : isSeller ? 'Seller' : 'Observer';
+  const isJoinable = isOpenDeal && !isSellerJoined && !isBuyer;
+  const role = isBuyer ? 'Buyer' : isSeller ? 'Seller' : isOpenDeal && !isSellerJoined ? 'Open' : 'Observer';
 
   const hasSubmitted = isBuyer ? buyerDone : sellerDone;
   const bothSubmitted = buyerDone && sellerDone;
@@ -166,7 +171,13 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
 
           <div className="mt-4 grid grid-cols-2 gap-3">
             <PartyCard label="Buyer" address={buyer} isYou={isBuyer} submitted={buyerDone} />
-            <PartyCard label="Seller" address={seller} isYou={isSeller} submitted={sellerDone} />
+            <PartyCard
+              label="Seller"
+              address={isSellerJoined ? seller : '0x0000000000000000000000000000000000000000'}
+              isYou={isSeller}
+              submitted={sellerDone}
+              isOpen={isOpenDeal && !isSellerJoined}
+            />
           </div>
 
           <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
@@ -195,6 +206,11 @@ export function DealDetail({ dealId, onBack }: DealDetailProps) {
 
         {/* Actions */}
         <div className="p-5">
+          {/* Join as Seller for Open deals */}
+          {state === DealState.Open && isJoinable && (
+            <JoinDealSection dealId={dealId} onSuccess={refetch} />
+          )}
+
           {state === DealState.Open && isParticipant && !hasSubmitted && !isExpired && (
             <SubmitPriceSection dealId={dealId} isBuyer={isBuyer} onSuccess={refetch} />
           )}
@@ -286,15 +302,25 @@ function LifecycleTimeline({ steps }: { steps: Step[] }) {
 
 // ── Small Components ────────────────────────────────────────────────
 
-function PartyCard({ label, address, isYou, submitted }: { label: string; address: string; isYou: boolean; submitted: boolean }) {
+function PartyCard({ label, address, isYou, submitted, isOpen }: { label: string; address: string; isYou: boolean; submitted: boolean; isOpen?: boolean }) {
   return (
-    <div className="bg-white/[0.03] rounded-xl p-3 border border-white/[0.06]">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-slate-500">{label}</span>
-        <span className={`w-2 h-2 rounded-full ${submitted ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+    <div className={`rounded-xl p-3 border transition-all ${
+      isYou ? 'bg-indigo-500/10 border-indigo-500/20' : isOpen ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-white/[0.03] border-white/[0.06]'
+    }`}>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">{label}</span>
+        {isYou && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">You</span>}
+        {isOpen && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">Open</span>}
       </div>
-      <p className="text-sm font-mono text-slate-300">{address.slice(0, 6)}...{address.slice(-4)}</p>
-      {isYou && <span className="text-[10px] text-indigo-400 font-medium">you</span>}
+      {isOpen ? (
+        <p className="text-xs text-emerald-400">Waiting for seller to join...</p>
+      ) : (
+        <p className="text-xs font-mono text-slate-300 truncate">{address}</p>
+      )}
+      <div className="flex items-center gap-1 mt-1.5">
+        <span className={`w-1.5 h-1.5 rounded-full ${submitted ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+        <span className="text-[11px] text-slate-500">{submitted ? 'Submitted' : 'Waiting'}</span>
+      </div>
     </div>
   );
 }
@@ -752,6 +778,51 @@ function SwitchToArbButton({ chainId }: { chainId: number }) {
     >
       Switch to Arbitrum Sepolia for settlement
     </button>
+  );
+}
+
+// ── Join Deal Section (for Open marketplace deals) ───────────────
+
+function JoinDealSection({ dealId, onSuccess }: { dealId: bigint; onSuccess: () => void }) {
+  const contractAddress = useBlindDealAddress();
+  const { toast, update } = useContext(DealToastContext);
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const handleJoin = async () => {
+    const tid = toast('loading', 'Joining deal as seller...');
+    try {
+      const hash = await writeContractAsync({
+        address: contractAddress,
+        abi: BLIND_DEAL_ABI,
+        functionName: 'joinDeal',
+        args: [dealId],
+      });
+      update(tid, 'success', 'Joined deal as seller!');
+      onSuccess();
+    } catch (err) {
+      update(tid, 'error', err instanceof Error ? err.message : 'Failed to join deal');
+    }
+  };
+
+  return (
+    <div className="space-y-3 mb-4">
+      <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3">
+        <div className="flex items-center gap-2 text-xs text-emerald-400">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+          </svg>
+          <span className="font-medium">Open Deal — looking for seller</span>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-1">Be the first to join and negotiate this deal.</p>
+      </div>
+      <button
+        onClick={handleJoin}
+        disabled={isPending}
+        className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-medium rounded-xl hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-600/20"
+      >
+        {isPending ? 'Joining...' : 'Join as Seller'}
+      </button>
+    </div>
   );
 }
 

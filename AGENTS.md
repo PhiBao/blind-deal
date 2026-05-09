@@ -14,13 +14,15 @@ contracts/           Solidity (Hardhat)
   BlindDealResolver.sol  Privara escrow condition checker
 
 frontend/            React + Vite + wagmi v2
-  src/components/    UI components (Dashboard, DealDetail, CreateDeal, etc.)
+  src/components/    UI components (Dashboard, DealDetail, CreateDeal, MCPServer, etc.)
   src/config/        contract.ts (ABIs + addresses), cofhe.tsx, wagmi.ts
   api/escrow/        Vercel serverless API routes (create, fund, redeem)
 
-telegram-bot/        Telegraf bot for deal notifications + share links
+telegram-bot/        Telegraf bot: notifications + deep-links + /list /create /submit
+mcp-server/          MCP server with HTTP transport for AI agent integration
+start-bot.ts         Multi-service runner (spawns MCP + Telegram together)
 
-tasks/               Hardhat tasks (deploy, create-deal, submit-price, finalize, verify)
+tasks/               Hardhat tasks (deploy, create-deal, submit-price, finalize, verify, agent)
 test/                Hardhat tests with @cofhe/hardhat-plugin mock FHE
 ```
 
@@ -34,15 +36,17 @@ test/                Hardhat tests with @cofhe/hardhat-plugin mock FHE
 | Hardhat Plugin | `@cofhe/hardhat-plugin` | ^0.5.2 |
 | Frontend | React 18, wagmi v2, viem, Tailwind | latest |
 | Escrow | `@reineira-os/sdk` | ^0.3.1 |
+| MCP Server | `@modelcontextprotocol/sdk` | ^1.29.0 |
+| Telegram Bot | `telegraf` | ^4.16.3 |
 
-## Contract Deployments (v5)
+## Contract Deployments
 
 | Chain | BlindDeal | Resolver |
 |---|---|---|
 | Arbitrum Sepolia | `0xabf1161bEcf179A4Cb6604387273931E1d76A65c` | `0x22480315309C85cdc2648cc6eD897ee96b755250` |
 | Ethereum Sepolia | `0xBed299e6e40233bD4Cac7bd472356F16e99EBf10` | `0x639794F956A4b2CC2C62a5DF9eE71B29a7C7a53E` |
 
-v5 fix: `createDecryptTask` wrapped in `try/catch` because the Sepolia TASK_MANAGER (`0xeA30c4B8...`) doesn't support this function.
+`createDecryptTask` wrapped in `try/catch` because the Sepolia TASK_MANAGER doesn't support this function.
 
 ## Smart Contract State Machine
 
@@ -53,6 +57,8 @@ Open → [deadline passed] → Expired
 ```
 
 **States:** `Open(0)`, `Matched(1)`, `NoMatch(2)`, `Cancelled(3)`, `Expired(4)`
+
+**Deal Types:** `Direct(0)`, `Open(1)` — Open deals use `address(0)` as placeholder seller, first-come-first-served via `joinDeal()`.
 
 ## Critical Patterns
 
@@ -71,6 +77,13 @@ Open → [deadline passed] → Expired
 - `FHE.allow(handle, address)` — allow a specific address to decrypt
 - `FHE.allowGlobal(handle)` — allow anyone to decrypt (used for match result)
 
+### Open Deal Flow
+
+1. Buyer creates Open deal: `createDeal(address(0), description, minPrice, maxPrice, deadline)`
+2. Anyone can join: `joinDeal(dealId)` — fills the seller slot
+3. Both submit prices: `submitBuyerPrice()` / `submitSellerPrice()`
+4. Resolve + finalize like normal
+
 ### Frontend Key Patterns
 
 - **RPC URLs**: Must use `VITE_` prefix for Vite env vars. Configured in wagmi.ts via `import.meta.env.VITE_SEPOLIA_RPC_URL`
@@ -87,8 +100,6 @@ Open → [deadline passed] → Expired
 3. **Fund** → API server calls `escrow.fund(amount)` (with simulated fallback for testnet)
 4. **Redeem** → API server calls `escrow.redeem()` (with simulated fallback for testnet)
 
-**Important**: The Reineira SDK v0.3.1 uses different contract addresses than v0.2.0. The frontend's `contract.ts` must match the SDK's addresses.
-
 ### Escrow Contract Addresses (Reineira SDK v0.3.1)
 | Contract | Arbitrum Sepolia Address |
 |---|---|
@@ -98,63 +109,141 @@ Open → [deadline passed] → Expired
 ### Frontend Escrow State
 - Escrow ID, status, and tx hashes are persisted to `localStorage` via `useEscrow.ts`
 - Status values: `none | created | linking | linked | funded | redeemed`
-- After redemption, status persists across page reloads (fixes "redeem button still enabled" bug)
+- After redemption, status persists across page reloads
 - Fund/redeem tx hashes shown with explorer links (`sepolia.arbiscan.io` for Arbitrum Sepolia)
 
-## Testing with Mock FHE
+## Telegram Bot
 
-```typescript
-const client = await hre.cofhe.createClientWithBatteries(signer)
-const [enc] = await client.encryptInputs([Encryptable.uint64(100n)]).execute()
+Long-running process. Start locally: `pnpm start:bot telegram`
 
-// Read plaintext directly from mock
-await hre.cofhe.mocks.expectPlaintext(handle, 100n)
+**Commands:** `/start` `/help` `/list` `/status` `/create` `/submit` `/share` `/subscribe` `/unsubscribe` `/subscriptions`
+
+**Event polling:** Every 15s, checks contract events and notifies subscribers.
+
+**Config env vars:**
+- `TELEGRAM_BOT_TOKEN` — bot token from @BotFather
+- `TELEGRAM_BOT_USERNAME` — username (e.g. `BlindDealBot`)
+- `FRONTEND_URL` — for deep-links (e.g. `https://blinddeal.vercel.app`)
+
+## MCP Server
+
+HTTP-based MCP server using `@modelcontextprotocol/sdk` with Streamable HTTP transport.
+
+**Start locally:** `pnpm mcp` or `pnpm start:bot mcp`
+
+**Endpoints:**
+- `POST /mcp` — MCP JSON-RPC requests
+- `GET /mcp` — SSE streaming (for protocol negotiation)
+- `GET /health` — Health check
+
+**Tools available:**
+| Tool | Description |
+|---|---|
+| `get_deal` | Fetch deal state, parties, description, submission status |
+| `list_deals` | List marketplace deals with state/type filtering |
+| `get_user_deals` | Get all deals for a wallet address |
+| `get_events` | Fetch recent contract events |
+| `subscribe_deal` | Subscribe to deal notifications |
+| `create_deal` | Info only (requires wallet for on-chain tx) |
+
+**Resources available:**
+- `blinddeal://contract/arbitrum-sepolia` — contract address + explorer
+- `blinddeal://contract/ethereum-sepolia` — contract address + explorer
+- `blinddeal://schema/deal` — deal data schema
+- `blinddeal://events` — all event types
+- `blinddeal://deal-types` — Direct(0) / Open(1)
+- `blinddeal://deal-states` — Open/Matched/NoMatch/Cancelled/Expired
+
+**Connect Claude Desktop:**
+```json
+{
+  "mcpServers": {
+    "blinddeal": {
+      "command": "npx tsx",
+      "args": ["mcp-server/index.ts"]
+    }
+  }
+}
 ```
 
-## Deployment
+## Telegram Deep-Links
+
+Telegram bot commands generate deep-links to the frontend:
+
+| URL Format | Effect |
+|---|---|
+| `{FRONTEND_URL}?deal=42&chain=421614` | Opens deal #42 detail |
+| `{FRONTEND_URL}?action=create` | Opens deal creation page |
+| `{FRONTEND_URL}?deal=42&action=submit` | Opens deal #42 with submit intent |
+| `{FRONTEND_URL}?action=mcp` | Opens MCP page |
+
+App.tsx reads `?deal=` and `?action=` on mount and navigates accordingly.
+
+## AI Agent
+
+Hardhat task that autonomously discovers Open marketplace deals, joins as seller, and submits FHE-encrypted prices.
 
 ```bash
-# Arbitrum Sepolia
-pnpm arb-sepolia:deploy-blinddeal
-pnpm arb-sepolia:deploy-resolver
+# Discover + join + submit (uses account[1] as agent seller)
+npx hardhat agent --price 500 --network arb-sepolia
 
-# Ethereum Sepolia
-pnpm eth-sepolia:deploy-blinddeal
-pnpm eth-sepolia:deploy-resolver
+# Full demo: create → join → submit buyer → submit seller → finalize
+npx hardhat agent --mode full --price 500 --network arb-sepolia
 ```
 
-After deployment, update `frontend/src/config/contract.ts` with new addresses.
+Uses `@cofhe/hardhat-plugin` for FHE encryption in Node.js.
+
+## Multi-Service Runner
+
+Both Telegram bot and MCP server run together on Render as a Background Worker.
+
+**start-bot.ts** spawns both as child processes with auto-restart on crash.
+
+```bash
+pnpm start:bot           # Run both MCP + Telegram
+pnpm start:bot mcp       # MCP only
+pnpm start:bot telegram  # Telegram only
+```
+
+**Render deployment:** Use `render.yaml` — Background Worker type, start command `npx tsx start-bot.ts all`
 
 ## Environment Variables
 
 Copy `.env.example` → `.env` and fill:
 
-- `PRIVATE_KEY` — deployer + hot wallet
-- `SEPOLIA_RPC_URL` / `ARBITRUM_SEPOLIA_RPC_URL` — for contract deployment
-- `VITE_SEPOLIA_RPC_URL` / `VITE_ARBITRUM_SEPOLIA_RPC_URL` — for frontend (must have VITE_ prefix)
-- `ETHERSCAN_API_KEY` — for contract verification
-- `TELEGRAM_BOT_TOKEN` — for telegram-bot notifications
-- `FRONTEND_URL` — for share links and Vercel deployment
+| Variable | Purpose |
+|---|---|
+| `PRIVATE_KEY` | Deployer + hot wallet |
+| `SEPOLIA_RPC_URL` / `ARBITRUM_SEPOLIA_RPC_URL` | Contract deployment |
+| `VITE_SEPOLIA_RPC_URL` / `VITE_ARBITRUM_SEPOLIA_RPC_URL` | Frontend (VITE_ prefix) |
+| `ETHERSCAN_API_KEY` | Contract verification |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot |
+| `TELEGRAM_BOT_USERNAME` | Bot username (e.g. `BlindDealBot`) |
+| `FRONTEND_URL` | Deep-links (e.g. `https://blinddeal.vercel.app`) |
+| `MCP_PORT` | MCP server port (default 3001) |
+| `VITE_TELEGRAM_BOT_USERNAME` | Frontend bot username (VITE_ prefix) |
+| `VITE_MCP_ENDPOINT` | Frontend MCP endpoint (VITE_ prefix) |
 
 ## Build & Test
 
 ```bash
 pnpm install
 pnpm compile        # Compile Solidity
-pnpm test           # Run Hardhat tests (27 tests)
+pnpm test           # Run Hardhat tests (34 tests)
 cd frontend && npx tsc --noEmit   # Type-check frontend
 cd frontend && npx vite build     # Production build
 ```
 
 ## Common Issues
 
-1. **"FHE.decrypt not found"** — You're on old cofhe-contracts. Use `ITaskManager.createDecryptTask()` (wrapped in try/catch).
+1. **"FHE.decrypt not found"** — Use `ITaskManager.createDecryptTask()` (wrapped in try/catch).
 2. **Worker not loading in dev** — The `cofhe-worker-serve` Vite plugin handles `zkProve.worker.js`.
-3. **"Loading deal..." stuck** — Check that `VITE_SEPOLIA_RPC_URL` is set in `.env`. Public RPCs are rate-limited.
+3. **"Loading deal..." stuck** — Check that `VITE_SEPOLIA_RPC_URL` is set. Public RPCs are rate-limited.
 4. **"Do not know how to serialize a BigInt"** — Convert BigInt to string before `JSON.stringify`.
-5. **Escrow fund reverts with ECDSAInvalidSignatureS** — The verifier API sometimes returns normalized signatures. Reineira SDK v0.3.1 uses `@cofhe/sdk@0.5.2` which handles this.
-6. **Toast not auto-closing** — Ensure `update(tid, 'success', msg)` is called after tx confirms. Use `publicClient.waitForTransactionReceipt` for reliable confirmation.
+5. **Escrow fund reverts with ECDSAInvalidSignatureS** — Reineira SDK v0.3.1 handles this.
+6. **Toast not auto-closing** — Use `publicClient.waitForTransactionReceipt` for reliable confirmation.
 7. **Type errors with viem wallet client** — Always pass `account` to `writeContract` in viem v2.
+8. **MCP Server not starting** — Uses CJS require because `@modelcontextprotocol/sdk` ESM exports are broken in Node 23. All `require()` calls use relative paths via `__dirname` for Render compatibility.
 
 ## Code Style
 
