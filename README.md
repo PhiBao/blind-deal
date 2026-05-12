@@ -419,21 +419,58 @@ pnpm arb-sepolia:deploy-resolver
 
 ### Run Frontend + Services
 
+**One command — all 4 services:**
+
 ```bash
-# Terminal 1: API server (escrow operations via Privara SDK)
-cd frontend && pnpm dev:api
+pnpm dev:all
+```
 
-# Terminal 2: Telegram bot (long-running)
-pnpm start:bot telegram
+Launches with color-coded logs, port conflict detection, and auto-restart:
 
-# Terminal 3: MCP server (long-running)
-pnpm mcp
+```
+[frontend  ] http://localhost:3000     (Vite dev server)
+[api       ] http://localhost:3002     (Escrow API — create/fund/redeem)
+[mcp       ] http://localhost:3001     (MCP Server for AI agents)
+[telegram  ] Bot running              (Telegram notifications)
+```
 
-# Terminal 4: Vite dev server
-cd frontend && pnpm dev
+Press `Ctrl+C` to stop all services.
+
+**Or run individually:**
+
+```bash
+pnpm dev:fe          # Frontend only (:3000)
+pnpm dev:api         # API server only (:3002)
+pnpm mcp             # MCP Server only (:3001)
+pnpm start:bot telegram  # Telegram bot only
+pnpm start:bot       # MCP + Telegram (production-like)
 ```
 
 Open `http://localhost:3000`
+
+---
+
+## Deployment
+
+Full deployment guide in [`DEPLOYMENT_GUIDE.md`](./DEPLOYMENT_GUIDE.md).
+
+| Component | Platform | Service |
+|---|---|---|
+| Frontend + Escrow API | **Vercel** | Serverless (auto-scaling) |
+| MCP Server + Telegram Bot | **Render** | Background Worker (free tier) |
+
+### Quick Deploy
+
+```bash
+# Vercel (frontend + API)
+cd frontend
+vercel --prod
+
+# Render (MCP + Telegram)
+# Import repo as Background Worker → start: npx tsx start-bot.ts all
+```
+
+Environment variables reference and step-by-step instructions in [`DEPLOYMENT_GUIDE.md`](./DEPLOYMENT_GUIDE.md).
 
 ---
 

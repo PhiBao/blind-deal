@@ -123,7 +123,7 @@ Long-running process. Start locally: `pnpm start:bot telegram`
 **Config env vars:**
 - `TELEGRAM_BOT_TOKEN` — bot token from @BotFather
 - `TELEGRAM_BOT_USERNAME` — username (e.g. `BlindDealBot`)
-- `FRONTEND_URL` — for deep-links (e.g. `https://blinddeal.vercel.app`)
+- `FRONTEND_URL` — for deep-links (e.g. `https://blind-deal.vercel.app`)
 
 ## MCP Server
 
@@ -219,7 +219,7 @@ Copy `.env.example` → `.env` and fill:
 | `ETHERSCAN_API_KEY` | Contract verification |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot |
 | `TELEGRAM_BOT_USERNAME` | Bot username (e.g. `BlindDealBot`) |
-| `FRONTEND_URL` | Deep-links (e.g. `https://blinddeal.vercel.app`) |
+| `FRONTEND_URL` | Deep-links (e.g. `https://blind-deal.vercel.app`) |
 | `MCP_PORT` | MCP server port (default 3001) |
 | `VITE_TELEGRAM_BOT_USERNAME` | Frontend bot username (VITE_ prefix) |
 | `VITE_MCP_ENDPOINT` | Frontend MCP endpoint (VITE_ prefix) |

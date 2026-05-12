@@ -10,15 +10,6 @@ const __dirname = dirname(__filename);
 const require = createRequire(import.meta.url);
 dotenv.config({ path: join(__dirname, '../.env') });
 
-const SDK_CJS = join(__dirname, '../node_modules/@modelcontextprotocol/sdk/dist/cjs');
-
-// @ts-ignore
-const { Server } = require(join(SDK_CJS, 'server/index.js'));
-// @ts-ignore
-const { createMcpExpressApp } = require(join(SDK_CJS, 'server/express.js'));
-// @ts-ignore
-const { ListToolsRequestSchema, CallToolRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema } = require(join(SDK_CJS, 'types.js'));
-
 const PORT = Number(process.env.MCP_PORT || 3001);
 const CHAIN = arbitrumSepolia;
 
@@ -55,10 +46,6 @@ const CONTRACT = CONTRACTS[arbitrumSepolia.id];
 
 const STATE_LABELS = ['Open', 'Matched', 'No Match', 'Cancelled', 'Expired'];
 
-function contractForChain(chainId: number) {
-  return CONTRACTS[chainId] ?? CONTRACTS[arbitrumSepolia.id];
-}
-
 async function getDealInfo(dealId: bigint) {
   const addr = CONTRACT;
   const [state, parties, desc, submitted, dealType, minPrice, maxPrice] = await Promise.all([
@@ -73,348 +60,265 @@ async function getDealInfo(dealId: bigint) {
   return { state: Number(state), parties, desc, submitted, dealType: Number(dealType), minPrice, maxPrice };
 }
 
-const server = new Server(
-  {
-    name: 'BlindDeal MCP Server',
-    version: '1.0.0',
-    description: 'Model Context Protocol server for BlindDeal FHE-based confidential price negotiation',
-  },
-  {
-    capabilities: {
-      tools: {},
-      resources: {},
-    },
-  }
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: 'create_deal',
-      description: 'Create a new blind negotiation deal on BlindDeal protocol. The deal will be Open type if no seller is specified.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          description: { type: 'string', description: 'Deal description' },
-          minPrice: { type: 'number', description: 'Minimum acceptable price (wei or token units)' },
-          maxPrice: { type: 'number', description: 'Maximum acceptable price (wei or token units)' },
-          seller: { type: 'string', description: 'Seller address (optional, omit for Open marketplace deal)' },
-          deadline: { type: 'number', description: 'Deadline timestamp (optional, defaults to 7 days)' },
-        },
-        required: ['description', 'minPrice', 'maxPrice'],
-      },
-    },
-    {
-      name: 'get_deal',
-      description: 'Fetch deal details including state, parties, submission status, and price range.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          dealId: { type: 'number', description: 'The deal ID to fetch' },
-        },
-        required: ['dealId'],
-      },
-    },
-    {
-      name: 'list_deals',
-      description: 'List marketplace deals with optional state and type filtering.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          state: { type: 'string', description: 'Filter by state: open, matched, no-match, cancelled, expired' },
-          limit: { type: 'number', description: 'Maximum number of deals to return (default 20)' },
-          offset: { type: 'number', description: 'Offset for pagination (default 0)' },
-        },
-      },
-    },
-    {
-      name: 'get_events',
-      description: 'Get recent blockchain events for BlindDeal contract.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          eventType: { type: 'string', description: 'Event type: DealCreated, DealJoined, PriceSubmitted, DealResolving, DealResolved, DealCancelled, DealExpired' },
-          fromBlock: { type: 'number', description: 'Starting block number (default: last 100 blocks)' },
-          dealId: { type: 'number', description: 'Filter by specific deal ID' },
-        },
-      },
-    },
-    {
-      name: 'get_user_deals',
-      description: 'Get all deals associated with a specific wallet address.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          address: { type: 'string', description: 'Wallet address to query' },
-        },
-        required: ['address'],
-      },
-    },
-    {
-      name: 'subscribe_deal',
-      description: 'Subscribe to deal event notifications. Returns confirmation with deal details.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          dealId: { type: 'number', description: 'Deal ID to subscribe to' },
-          address: { type: 'string', description: 'Wallet address for notifications' },
-        },
-        required: ['dealId'],
-      },
-    },
-  ],
-}));
-
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-  resources: [
-    {
-      uri: 'blinddeal://contract/arbitrum-sepolia',
-      name: 'Arbitrum Sepolia Contract',
-      description: 'BlindDeal contract address on Arbitrum Sepolia testnet',
-      mimeType: 'application/json',
-    },
-    {
-      uri: 'blinddeal://contract/ethereum-sepolia',
-      name: 'Ethereum Sepolia Contract',
-      description: 'BlindDeal contract address on Ethereum Sepolia testnet',
-      mimeType: 'application/json',
-    },
-    {
-      uri: 'blinddeal://schema/deal',
-      name: 'Deal Schema',
-      description: 'Schema definition for deal data returned by get_deal',
-      mimeType: 'application/json',
-    },
-    {
-      uri: 'blinddeal://events',
-      name: 'Event Types',
-      description: 'All event types emitted by BlindDeal contract',
-      mimeType: 'application/json',
-    },
-    {
-      uri: 'blinddeal://deal-types',
-      name: 'Deal Types',
-      description: 'Deal type enum: 0 = Direct, 1 = Open (marketplace)',
-      mimeType: 'application/json',
-    },
-    {
-      uri: 'blinddeal://deal-states',
-      name: 'Deal States',
-      description: 'Deal state enum: 0=Open, 1=Matched, 2=NoMatch, 3=Cancelled, 4=Expired',
-      mimeType: 'application/json',
-    },
-  ],
-}));
-
-server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
-  const uri = req.params.uri;
-  switch (uri) {
-    case 'blinddeal://contract/arbitrum-sepolia':
-      return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify({ address: CONTRACT, chain: 'arbitrum-sepolia', explorer: 'https://sepolia.arbiscan.io' }) }] };
-    case 'blinddeal://contract/ethereum-sepolia':
-      return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify({ address: CONTRACTS[sepolia.id], chain: 'ethereum-sepolia', explorer: 'https://sepolia.etherscan.io' }) }] };
-    case 'blinddeal://schema/deal':
-      return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify({ state: 'uint8', parties: 'address[2]', description: 'string', submitted: 'bool[2]', dealType: 'uint8', minPrice: 'uint256', maxPrice: 'uint256' }, null, 2) }] };
-    case 'blinddeal://events':
-      return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(['DealCreated', 'DealJoined', 'PriceSubmitted', 'DealResolving', 'DealResolved', 'DealCancelled', 'DealExpired'], null, 2) }] };
-    case 'blinddeal://deal-types':
-      return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify({ 0: 'Direct', 1: 'Open (marketplace)' }, null, 2) }] };
-    case 'blinddeal://deal-states':
-      return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(STATE_LABELS.map((label, i) => ({ [i]: label })).reduce((a, b) => ({ ...a, ...b }), {}), null, 2) }] };
-    default:
-      throw new Error(`Unknown resource: ${uri}`);
-  }
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const { name, arguments: args } = req.params;
-
-  try {
-    switch (name) {
-      case 'get_deal': {
-        const dealId = BigInt(args.dealId as number);
-        const info = await getDealInfo(dealId);
-        const [buyerDone, sellerDone] = info.submitted as [boolean, boolean];
-        const isOpen = info.dealType === 1;
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              dealId: Number(dealId),
-              state: STATE_LABELS[info.state],
-              stateCode: info.state,
-              buyer: info.parties[0],
-              seller: info.parties[1],
-              description: info.desc,
-              buyerSubmitted: buyerDone,
-              sellerSubmitted: sellerDone,
-              dealType: isOpen ? 'Open (marketplace)' : 'Direct',
-              priceRange: info.minPrice && info.maxPrice ? { min: info.minPrice.toString(), max: info.maxPrice.toString() } : null,
-              explorerUrl: `https://sepolia.arbiscan.io/address/${CONTRACT}?dealId=${dealId}`,
-            }, null, 2),
-          }],
-        };
-      }
-
-      case 'list_deals': {
-        const count = await client.readContract({ address: CONTRACT, abi: BLIND_DEAL_ABI, functionName: 'dealCount' });
-        const limit = (args.limit as number) || 20;
-        const offset = (args.offset as number) || 0;
-        const stateFilter = args.state as string | undefined;
-
-        const stateMap: Record<string, number> = { open: 0, matched: 1, 'no-match': 2, cancelled: 3, expired: 4 };
-        const targetState = stateFilter ? stateMap[stateFilter] : undefined;
-
-        const results = [];
-        const total = Number(count);
-        const start = Math.max(0, total - 1 - offset);
-        const end = Math.max(0, start - limit);
-
-        for (let id = start; id >= end && results.length < limit; id--) {
-          try {
-            const info = await getDealInfo(BigInt(id));
-            if (targetState !== undefined && info.state !== targetState) continue;
-            const [buyerDone, sellerDone] = info.submitted as [boolean, boolean];
-            results.push({
-              dealId: id,
-              state: STATE_LABELS[info.state],
-              stateCode: info.state,
-              description: info.desc,
-              buyer: info.parties[0],
-              seller: info.parties[1],
-              dealType: info.dealType === 1 ? 'Open' : 'Direct',
-              buyerSubmitted: buyerDone,
-              sellerSubmitted: sellerDone,
-            });
-          } catch {}
-        }
-
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ total: Number(count), deals: results }, null, 2) }],
-        };
-      }
-
-      case 'get_user_deals': {
-        const addr = args.address as string;
-        const deals = await client.readContract({ address: CONTRACT, abi: BLIND_DEAL_ABI, functionName: 'getUserDeals', args: [addr] }) as bigint[];
-        const results = [];
-        for (const id of deals.slice(-20)) {
-          try {
-            const info = await getDealInfo(id);
-            results.push({ dealId: Number(id), state: STATE_LABELS[info.state], description: info.desc });
-          } catch {}
-        }
-        return { content: [{ type: 'text', text: JSON.stringify({ address: addr, deals: results }, null, 2) }] };
-      }
-
-      case 'get_events': {
-        const eventType = args.eventType as string | undefined;
-        const fromBlock = args.fromBlock as number | undefined;
-        const dealIdFilter = args.dealId as number | undefined;
-
-        let abiEvents = ['DealCreated', 'DealJoined', 'PriceSubmitted', 'DealResolving', 'DealResolved', 'DealCancelled', 'DealExpired'] as const;
-        if (eventType) {
-          abiEvents = [eventType as typeof abiEvents[number]];
-        }
-
-        const logs = await client.getContractEvents({
-          address: CONTRACT,
-          abi: BLIND_DEAL_ABI,
-          fromBlock: fromBlock ? BigInt(fromBlock) : undefined,
-        });
-
-        let filtered = logs;
-        if (dealIdFilter !== undefined) {
-          filtered = filtered.filter((l) => Number((l.args as any)?.dealId) === dealIdFilter);
-        }
-
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(filtered.slice(-50).map((l) => ({
-              event: l.eventName,
-              dealId: Number((l.args as any)?.dealId),
-              blockNumber: Number(l.blockNumber),
-              transactionHash: l.transactionHash,
-              args: Object.fromEntries(Object.entries(l.args ?? {}).filter(([k]) => !Number.isNaN(Number(k)))),
-            })), null, 2),
-          }],
-        };
-      }
-
-      case 'subscribe_deal': {
-        const dealId = args.dealId as number;
-        const notifyAddr = args.address as string | undefined;
-        const info = await getDealInfo(BigInt(dealId));
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              subscribed: true,
-              dealId,
-              dealState: STATE_LABELS[info.state],
-              description: info.desc,
-              notificationAddress: notifyAddr || 'not specified',
-              message: 'Subscribed to deal notifications. The Telegram bot will notify on events: DealCreated, DealJoined, PriceSubmitted, DealResolving, DealResolved.',
-            }, null, 2),
-          }],
-        };
-      }
-
-      case 'create_deal': {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              note: 'create_deal requires a wallet with PRIVATE_KEY to sign transactions. Use the Hardhat CLI or frontend for this operation.',
-              description: args.description,
-              minPrice: args.minPrice,
-              maxPrice: args.maxPrice,
-              seller: args.seller || 'Open marketplace (any seller can join)',
-              deadline: args.deadline || (Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60),
-              contract: CONTRACT,
-              instructions: 'To create a deal, either: (1) Use the BlindDeal frontend at blinddeal.vercel.app, or (2) Run: npx hardhat create-deal --description "..." --minPrice ... --maxPrice ... --network arb-sepolia',
-            }, null, 2),
-          }],
-        };
-      }
-
-      default:
-        throw new Error(`Unknown tool: ${name}`);
-    }
-  } catch (err: any) {
-    return {
-      content: [{ type: 'text', text: `Error: ${err.message}` }],
-      isError: true,
-    };
-  }
-});
-
 const HTTP_PORT = Number(process.env.MCP_PORT || 3001);
 
 async function startHttp() {
   const http = require('http');
-  // @ts-ignore
-  const { StreamableHTTPServerTransport } = require(join(SDK_CJS, 'server/streamableHttp.js'));
 
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined, // stateless mode
-  });
-
-  await server.connect(transport);
-
-  const server2 = http.createServer((req: any, res: any) => {
+  // Raw JSON-RPC handler — avoids SDK Streamable HTTP stateless mode bugs
+  const server2 = http.createServer(async (req: any, res: any) => {
+    // Health check
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok', name: 'BlindDeal MCP Server', version: '1.0.0' }));
       return;
     }
-    transport.handleRequest(req, res, req.body);
+
+    // Only handle POST /mcp for JSON-RPC
+    if (req.method !== 'POST' || (req.url !== '/mcp' && req.url !== '/')) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    // Read body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = Buffer.concat(chunks).toString();
+
+    let rpc: any;
+    try { rpc = JSON.parse(body); } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }));
+      return;
+    }
+
+    const id = rpc.id ?? null;
+    const respond = (result: any) => {
+      const data = JSON.stringify({ jsonrpc: '2.0', result, id });
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+      res.end(`event: message\ndata: ${data}\n\n`);
+    };
+    const respondError = (code: number, message: string) => {
+      const data = JSON.stringify({ jsonrpc: '2.0', error: { code, message }, id });
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+      res.end(`event: message\ndata: ${data}\n\n`);
+    };
+
+    try {
+      const method = rpc.method;
+      const params = rpc.params ?? {};
+
+      switch (method) {
+        // ── tools/list ──────────────────────────────────────
+        case 'tools/list':
+          return respond({
+            tools: [
+              {
+                name: 'get_deal',
+                description: 'Fetch deal details including state, parties, submission status, and price range.',
+                inputSchema: { type: 'object', properties: { dealId: { type: 'number', description: 'The deal ID' } }, required: ['dealId'] },
+              },
+              {
+                name: 'list_deals',
+                description: 'List marketplace deals with optional state and type filtering.',
+                inputSchema: { type: 'object', properties: { state: { type: 'string', description: 'Filter: open, matched, no-match, cancelled, expired' }, limit: { type: 'number' }, offset: { type: 'number' } } },
+              },
+              {
+                name: 'get_user_deals',
+                description: 'Get all deals for a wallet address.',
+                inputSchema: { type: 'object', properties: { address: { type: 'string' } }, required: ['address'] },
+              },
+              {
+                name: 'get_events',
+                description: 'Fetch recent contract events.',
+                inputSchema: { type: 'object', properties: { eventType: { type: 'string' }, fromBlock: { type: 'number' }, dealId: { type: 'number' } } },
+              },
+              {
+                name: 'subscribe_deal',
+                description: 'Subscribe to deal event notifications.',
+                inputSchema: { type: 'object', properties: { dealId: { type: 'number' }, address: { type: 'string' } }, required: ['dealId'] },
+              },
+              {
+                name: 'create_deal',
+                description: 'Create a new deal (info only — requires wallet for on-chain tx).',
+                inputSchema: { type: 'object', properties: { description: { type: 'string' }, minPrice: { type: 'number' }, maxPrice: { type: 'number' }, seller: { type: 'string' }, deadline: { type: 'number' } }, required: ['description', 'minPrice', 'maxPrice'] },
+              },
+            ],
+          });
+
+        // ── resources/list ───────────────────────────────────
+        case 'resources/list':
+          return respond({
+            resources: [
+              { uri: 'blinddeal://contract/arbitrum-sepolia', name: 'Arbitrum Sepolia Contract', description: 'BlindDeal contract on Arbitrum Sepolia', mimeType: 'application/json' },
+              { uri: 'blinddeal://contract/ethereum-sepolia', name: 'Ethereum Sepolia Contract', description: 'BlindDeal contract on Ethereum Sepolia', mimeType: 'application/json' },
+              { uri: 'blinddeal://schema/deal', name: 'Deal Schema', description: 'Deal data schema', mimeType: 'application/json' },
+              { uri: 'blinddeal://events', name: 'Event Types', description: 'All BlindDeal event types', mimeType: 'application/json' },
+              { uri: 'blinddeal://deal-types', name: 'Deal Types', description: '0=Direct, 1=Open (marketplace)', mimeType: 'application/json' },
+              { uri: 'blinddeal://deal-states', name: 'Deal States', description: '0=Open, 1=Matched, 2=NoMatch, 3=Cancelled, 4=Expired', mimeType: 'application/json' },
+            ],
+          });
+
+        // ── resources/read ───────────────────────────────────
+        case 'resources/read': {
+          const uri = params.uri as string;
+          const resourceMap: Record<string, any> = {
+            'blinddeal://contract/arbitrum-sepolia': { address: CONTRACT, chain: 'arbitrum-sepolia', explorer: 'https://sepolia.arbiscan.io' },
+            'blinddeal://contract/ethereum-sepolia': { address: CONTRACTS[sepolia.id], chain: 'ethereum-sepolia', explorer: 'https://sepolia.etherscan.io' },
+            'blinddeal://schema/deal': { state: 'uint8', parties: 'address[2]', description: 'string', submitted: 'bool[2]', dealType: 'uint8', minPrice: 'uint256', maxPrice: 'uint256' },
+            'blinddeal://events': ['DealCreated', 'DealJoined', 'PriceSubmitted', 'DealResolving', 'DealResolved', 'DealCancelled', 'DealExpired'],
+            'blinddeal://deal-types': { 0: 'Direct', 1: 'Open (marketplace)' },
+            'blinddeal://deal-states': { 0: 'Open', 1: 'Matched', 2: 'No Match', 3: 'Cancelled', 4: 'Expired' },
+          };
+          const data = resourceMap[uri];
+          if (!data) return respondError(-32602, `Unknown resource: ${uri}`);
+          return respond({ contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(data) }] });
+        }
+
+        // ── tools/call ───────────────────────────────────────
+        case 'tools/call': {
+          const toolName = params.name as string;
+          const args = (params.arguments ?? {}) as Record<string, any>;
+
+          switch (toolName) {
+            case 'get_deal': {
+              const dealId = BigInt(args.dealId as number);
+              const info = await getDealInfo(dealId);
+              const [buyerDone, sellerDone] = info.submitted as [boolean, boolean];
+              return respond({
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    dealId: Number(dealId),
+                    state: STATE_LABELS[info.state],
+                    stateCode: info.state,
+                    buyer: info.parties[0],
+                    seller: info.parties[1],
+                    description: info.desc,
+                    buyerSubmitted: buyerDone,
+                    sellerSubmitted: sellerDone,
+                    dealType: info.dealType === 1 ? 'Open (marketplace)' : 'Direct',
+                    priceRange: info.minPrice && info.maxPrice ? { min: info.minPrice.toString(), max: info.maxPrice.toString() } : null,
+                    explorerUrl: `https://sepolia.arbiscan.io/address/${CONTRACT}`,
+                  }, null, 2),
+                }],
+              });
+            }
+
+            case 'list_deals': {
+              const count = await client.readContract({ address: CONTRACT, abi: BLIND_DEAL_ABI, functionName: 'dealCount' });
+              const limit = (args.limit as number) || 20;
+              const offset = (args.offset as number) || 0;
+              const stateFilter = args.state as string | undefined;
+              const stateMap: Record<string, number> = { open: 0, matched: 1, 'no-match': 2, cancelled: 3, expired: 4 };
+              const targetState = stateFilter ? stateMap[stateFilter] : undefined;
+              const results: any[] = [];
+              const total = Number(count);
+              const start = Math.max(0, total - 1 - offset);
+              const end = Math.max(0, start - limit);
+              for (let id = start; id >= end && results.length < limit; id--) {
+                try {
+                  const info = await getDealInfo(BigInt(id));
+                  if (targetState !== undefined && info.state !== targetState) continue;
+                  const [buyerDone, sellerDone] = info.submitted as [boolean, boolean];
+                  results.push({ dealId: id, state: STATE_LABELS[info.state], stateCode: info.state, description: info.desc, buyer: info.parties[0], seller: info.parties[1], dealType: info.dealType === 1 ? 'Open' : 'Direct', buyerSubmitted: buyerDone, sellerSubmitted: sellerDone });
+                } catch {}
+              }
+              return respond({ content: [{ type: 'text', text: JSON.stringify({ total: Number(count), deals: results }, null, 2) }] });
+            }
+
+            case 'get_user_deals': {
+              const addr = args.address as string;
+              const deals = await client.readContract({ address: CONTRACT, abi: BLIND_DEAL_ABI, functionName: 'getUserDeals', args: [addr] }) as bigint[];
+              const dealResults = [];
+              for (const id of deals.slice(-20)) {
+                try {
+                  const info = await getDealInfo(id);
+                  dealResults.push({ dealId: Number(id), state: STATE_LABELS[info.state], description: info.desc });
+                } catch {}
+              }
+              return respond({ content: [{ type: 'text', text: JSON.stringify({ address: addr, deals: dealResults }, null, 2) }] });
+            }
+
+            case 'get_events': {
+              const eventType = args.eventType as string | undefined;
+              const fromBlock = args.fromBlock as number | undefined;
+              const dealIdFilter = args.dealId as number | undefined;
+              const fromBlockNum = fromBlock !== undefined ? BigInt(fromBlock) : (await client.getBlockNumber()) - 1000n;
+              const logs = await client.getContractEvents({ address: CONTRACT, abi: BLIND_DEAL_ABI, fromBlock: fromBlockNum });
+              let filtered = logs;
+              if (dealIdFilter !== undefined) filtered = filtered.filter((l: any) => Number(l.args?.dealId) === dealIdFilter);
+              return respond({
+                content: [{ type: 'text', text: JSON.stringify(filtered.slice(-50).map((l: any) => ({
+                  event: l.eventName, dealId: Number(l.args?.dealId), blockNumber: Number(l.blockNumber), transactionHash: l.transactionHash,
+                })), null, 2) }],
+              });
+            }
+
+            case 'subscribe_deal': {
+              const dealId2 = args.dealId as number;
+              const info = await getDealInfo(BigInt(dealId2));
+              return respond({
+                content: [{ type: 'text', text: JSON.stringify({
+                  subscribed: true, dealId: dealId2, dealState: STATE_LABELS[info.state], description: info.desc,
+                  message: 'Subscribed to deal notifications.',
+                }, null, 2) }],
+              });
+            }
+
+            case 'create_deal': {
+              return respond({
+                content: [{ type: 'text', text: JSON.stringify({
+                  note: 'create_deal requires a wallet. Use the frontend or Hardhat CLI.',
+                  description: args.description, minPrice: args.minPrice, maxPrice: args.maxPrice,
+                  seller: args.seller || 'Open marketplace', contract: CONTRACT,
+                }, null, 2) }],
+              });
+            }
+
+            default:
+              return respondError(-32601, `Unknown tool: ${toolName}`);
+          }
+        }
+
+        // ── Notifications (ping, etc.) ────────────────────────
+        case 'notifications/initialized':
+          return respond({});
+
+        default:
+          return respondError(-32601, `Method not found: ${method}`);
+      }
+    } catch (err: any) {
+      console.error('[MCP] Handler error:', err?.message || err);
+      return respondError(-32603, err?.message || 'Internal error');
+    }
   });
 
-  server2.listen(PORT, () => {
-    console.log(`BlindDeal MCP Server running on http://0.0.0.0:${PORT}/mcp`);
-  });
+  function tryListen(retries = 5, delay = 2000) {
+    server2.listen(PORT, () => {
+      console.log(`BlindDeal MCP Server running on http://0.0.0.0:${PORT}/mcp`);
+    });
+    server2.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE' && retries > 0) {
+        console.log(`Port ${PORT} in use — retrying in ${delay}ms (${retries} tries left)`);
+        server2.close();
+        setTimeout(() => tryListen(retries - 1, delay), delay);
+      } else {
+        console.error(`Failed to bind port ${PORT}:`, err.message);
+        process.exit(1);
+      }
+    });
+  }
+  tryListen();
 }
 
 startHttp().catch((err) => {

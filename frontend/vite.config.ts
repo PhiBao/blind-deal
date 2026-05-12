@@ -70,14 +70,19 @@ export default defineConfig({
   resolve: {
     alias: {
       tfhe: tfhePath,
-      // @cofhe/react imports @cofhe/abi but pnpm hoists it to the workspace root
-      '@cofhe/abi': path.resolve(__dirname, '..', 'node_modules/@cofhe/abi'),
+      // @cofhe/react imports @cofhe/abi — pnpm stores it in frontend's own node_modules
+      '@cofhe/abi': path.resolve(__dirname, 'node_modules/@cofhe/abi'),
     },
   },
   server: {
     port: 3000,
     proxy: {
       '/api': 'http://localhost:3002',
+      '/mcp': {
+        target: 'http://localhost:3001',
+        ws: false,
+        rewrite: (path) => path.replace(/^\/mcp/, ''),
+      },
     },
     fs: {
       allow: ['..', '../..', '../../node_modules'],

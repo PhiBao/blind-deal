@@ -1,0 +1,17 @@
+name: Keep Render Bot Alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"  # every 10 minutes
+  workflow_dispatch:  # manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping MCP Health
+        run: curl -sf https://blinddeal-bot.onrender.com/health
+        continue-on-error: true
+      - name: Ping Frontend
+        run: curl -sf https://blind-deal.vercel.app
+        continue-on-error: true

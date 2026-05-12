@@ -39,7 +39,7 @@ const CONTRACTS: Record<number, `0x${string}`> = {
   [sepolia.id]: '0xBed299e6e40233bD4Cac7bd472356F16e99EBf10',
 };
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://blinddeal.vercel.app';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://blind-deal.vercel.app';
 const BOT_USERNAME = process.env.VITE_TELEGRAM_BOT_USERNAME || 'BlindDealBot';
 
 const STATE_LABELS = ['Open', 'Matched', 'No Match', 'Cancelled', 'Expired'];
@@ -450,8 +450,25 @@ setInterval(pollEvents, 15_000);
 
 // ── Start ───────────────────────────────────────────────────────
 
-bot.launch();
-console.log('BlindDeal Telegram bot started');
+async function startBot(retries = 6, delay = 10000) {
+  try {
+    await bot.launch();
+    console.log('BlindDeal Telegram bot started');
+  } catch (err: any) {
+    const is409 = err?.response?.error_code === 409 || (err?.message || '').includes('409');
+    if (is409 && retries > 0) {
+      console.log(`Telegram 409 conflict (previous instance still connected). Retrying in ${delay/1000}s... (${retries} tries left)`);
+      await new Promise((r) => setTimeout(r, delay));
+      return startBot(retries - 1, delay);
+    }
+    throw err;
+  }
+}
+
+startBot().catch((err) => {
+  console.error('Failed to start bot:', err);
+  process.exit(1);
+});
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

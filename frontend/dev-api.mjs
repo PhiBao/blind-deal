@@ -216,8 +216,22 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`API dev server running on http://localhost:${PORT}`);
-  console.log(`Routes: ${Object.keys(ROUTES).join(', ')}`);
-  console.log(`Account: ${account.address}`);
-});
+function tryListen(retries = 5, delay = 2000) {
+  server.listen(PORT, () => {
+    console.log(`API dev server running on http://localhost:${PORT}`);
+    console.log(`Routes: ${Object.keys(ROUTES).join(', ')}`);
+    console.log(`Account: ${account.address}`);
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE' && retries > 0) {
+      console.log(`Port ${PORT} in use — retrying in ${delay}ms (${retries} tries left)`);
+      server.close();
+      setTimeout(() => tryListen(retries - 1, delay), delay);
+    } else {
+      console.error(`Failed to bind port ${PORT}:`, err.message);
+      process.exit(1);
+    }
+  });
+}
+
+tryListen();

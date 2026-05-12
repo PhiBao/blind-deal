@@ -13,8 +13,12 @@ interface ToolResult {
   response: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _importMeta = import.meta as any;
+const MCP_ENDPOINT = (_importMeta.env && _importMeta.env.VITE_MCP_ENDPOINT) || '/mcp';
+
 async function mcpCall(method: string, params: object = {}) {
-  const res = await fetch('/mcp', {
+  const res = await fetch(MCP_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -34,10 +38,6 @@ async function mcpCall(method: string, params: object = {}) {
   return { error: { message: text.slice(0, 200) } };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const _importMeta = import.meta as any;
-const MCP_ENDPOINT = (_importMeta.env && _importMeta.env.VITE_MCP_ENDPOINT) || 'http://localhost:3001/mcp';
-
 const TOOL_TESTS = [
   { name: 'tools/list', label: 'List Tools', desc: 'List all available MCP tools' },
   { name: 'resources/list', label: 'List Resources', desc: 'List all available resources' },
@@ -50,36 +50,30 @@ export function MCPServer({ onNavigate, currentPage }: MCPServerProps) {
   const { isConnected } = useAccount();
   const [results, setResults] = useState<Record<string, ToolResult>>({});
   const [expandedResult, setExpandedResult] = useState<string | null>(null);
-  const [clientInfo, setClientInfo] = useState<{ connected: boolean; protocolVersion?: string }>({ connected: false });
 
   const runTest = async (name: string, args?: Record<string, unknown>) => {
     setResults(prev => ({ ...prev, [name]: { name, args, status: 'loading', response: '' } }));
 
     try {
-      // Initialize if needed
-      if (!clientInfo.connected) {
-        const initRes = await mcpCall('initialize', {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: { name: 'BlindDeal-MCP-Tester', version: '1.0.0' },
-        });
-        if (initRes.error) {
-          setResults(prev => ({ ...prev, [name]: { name, args, status: 'error', response: `Init failed: ${initRes.error.message}` } }));
-          return;
-        }
-        setClientInfo({ connected: true, protocolVersion: '2024-11-05' });
-      }
+      // For tools/list and resources/list, send the method directly.
+      // For other tools, wrap in tools/call per MCP protocol.
+      const method = (name === 'tools/list' || name === 'resources/list') ? name : 'tools/call';
+      const params = (name === 'tools/list' || name === 'resources/list') ? {} : { name, arguments: args ?? {} };
 
-      const result: any = await mcpCall('tools/call', { name, arguments: args ?? {} });
+      const result: any = await mcpCall(method, params);
       const r = result as any;
       if (r?.error) {
         setResults(prev => ({ ...prev, [name]: { name, args, status: 'error', response: String(r.error.message) } }));
-      } else if (r?.content && r.content[0] && r.content[0].text) {
-        let display = String(r.content[0].text);
+      } else {
+        // Success — extract text from tools/call content, or serialize the whole result
+        let display: string;
+        if (r?.content && r.content[0] && r.content[0].text) {
+          display = String(r.content[0].text);
+        } else {
+          display = JSON.stringify(r, null, 2);
+        }
         try { display = JSON.stringify(JSON.parse(display), null, 2); } catch {}
         setResults(prev => ({ ...prev, [name]: { name, args, status: 'success', response: display } }));
-      } else {
-        setResults(prev => ({ ...prev, [name]: { name, args, status: 'error', response: JSON.stringify(result, null, 2) } }));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -107,10 +101,7 @@ export function MCPServer({ onNavigate, currentPage }: MCPServerProps) {
       <div className="glass rounded-xl p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-white">Server Info</h2>
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${clientInfo.connected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-            <span className="text-xs text-slate-400">{clientInfo.connected ? 'Connected' : 'Not initialized'}</span>
-          </div>
+          <span className="text-xs text-emerald-400">Active</span>
         </div>
 
         <div className="space-y-3">

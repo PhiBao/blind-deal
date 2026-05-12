@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useAccount, useReadContract, useReadContracts } from 'wagmi';
-import { BLIND_DEAL_ABI, useBlindDealAddress, DealState, DEAL_STATE_LABELS, DEAL_STATE_COLORS } from '../config/contract';
+import { useAccount, useReadContract, useReadContracts, useChainId } from 'wagmi';
+import { BLIND_DEAL_ABI, useBlindDealAddress, DealState, DealType, DEAL_STATE_LABELS, DEAL_STATE_COLORS } from '../config/contract';
 
 type Tab = 'my-deals' | 'marketplace';
 
@@ -195,10 +195,18 @@ function MarketplaceView({
   currentUser: `0x${string}`;
 }) {
   const contractAddress = useBlindDealAddress();
+  const chainId = useChainId();
+  const [stateFilter, setStateFilter] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(20);
+  const PAGE_SIZE = 20;
 
-  // Generate deal IDs: show latest 30 deals in reverse order
+  const explorerUrl = chainId === 421614
+    ? 'https://sepolia.arbiscan.io'
+    : 'https://sepolia.etherscan.io';
+
   const dealIds: bigint[] = [];
-  const maxShow = 30n;
+  const maxShow = BigInt(Math.max(Number(totalDeals), visibleLimit));
   const start = totalDeals > maxShow ? totalDeals - maxShow : 0n;
   for (let i = totalDeals - 1n; i >= start; i--) {
     dealIds.push(i);
@@ -209,6 +217,7 @@ function MarketplaceView({
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealState', args: [id] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealParties', args: [id] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealDescription', args: [id] },
+      { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealType', args: [id] },
     ]),
     query: { enabled: dealIds.length > 0, refetchInterval: 15000 },
   });
@@ -223,75 +232,197 @@ function MarketplaceView({
     );
   }
 
-  const openDeals: { id: bigint; description: string; buyer: string; seller: string }[] = [];
-
-  for (let i = 0; i < dealIds.length; i++) {
-    const stateResult = batchResults[i * 3];
-    const partiesResult = batchResults[i * 3 + 1];
-    const descResult = batchResults[i * 3 + 2];
-
-    if (stateResult.status !== 'success' || partiesResult.status !== 'success') continue;
-
-    const state = Number(stateResult.result);
-    const [buyer, seller] = partiesResult.result as unknown as [string, string];
-    const description = String(descResult.result ?? '');
-
-    // Only show Open deals that the current user is NOT part of
-    if (state === DealState.Open) {
-      const isParticipant =
-        currentUser.toLowerCase() === buyer.toLowerCase() ||
-        currentUser.toLowerCase() === seller.toLowerCase();
-      if (!isParticipant) {
-        openDeals.push({ id: dealIds[i], description, buyer, seller });
-      }
-    }
+  interface DealEntry {
+    id: bigint; state: number; buyer: string; seller: string;
+    description: string; dealType: number;
   }
 
-  if (openDeals.length === 0) {
+  const allDeals: DealEntry[] = [];
+  for (let i = 0; i < dealIds.length; i++) {
+    const stateResult = batchResults[i * 4];
+    const partiesResult = batchResults[i * 4 + 1];
+    const descResult = batchResults[i * 4 + 2];
+    const typeResult = batchResults[i * 4 + 3];
+    if (stateResult?.status !== 'success' || partiesResult?.status !== 'success') continue;
+    const [buyer, seller] = partiesResult.result as unknown as [string, string];
+    allDeals.push({
+      id: dealIds[i],
+      state: Number(stateResult.result),
+      buyer, seller,
+      description: String(descResult?.result ?? ''),
+      dealType: Number(typeResult?.result ?? 0),
+    });
+  }
+
+  let filtered = allDeals;
+  if (stateFilter !== null) {
+    filtered = filtered.filter((d) => d.state === stateFilter);
+  }
+  if (searchQuery.trim()) {
+    const q = searchQuery.trim();
+    const qLower = q.toLowerCase();
+    filtered = filtered.filter((d) =>
+      d.id.toString() === q ||
+      d.description.toLowerCase().includes(qLower) ||
+      d.buyer.toLowerCase().includes(qLower) ||
+      d.seller.toLowerCase().includes(qLower)
+    );
+  }
+
+  const isOpenForSellers = (d: DealEntry) =>
+    d.dealType === DealType.Open &&
+    d.seller === '0x0000000000000000000000000000000000000000';
+
+  const isParticipating = (d: DealEntry) =>
+    currentUser.toLowerCase() === d.buyer.toLowerCase() ||
+    currentUser.toLowerCase() === d.seller.toLowerCase();
+
+  if (filtered.length === 0 && !searchQuery && stateFilter === null) {
     return (
       <div className="text-center py-12">
-        <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-slate-500/10 flex items-center justify-center">
-          <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+        <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-indigo-500/10 flex items-center justify-center">
+          <svg className="w-7 h-7 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 1.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z" />
           </svg>
         </div>
-        <p className="text-white font-medium mb-1">No Open Deals</p>
-        <p className="text-sm text-slate-400">The marketplace is empty right now. Check back later!</p>
+        <p className="text-white font-medium mb-1">No Deals in Marketplace</p>
+        <p className="text-sm text-slate-400 mb-6">Be the first to create a negotiation deal!</p>
       </div>
     );
   }
 
+  const handles = (d: DealEntry) => {
+    onSelectDeal(d.id);
+  };
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Open Marketplace</h2>
-        <span className="text-sm text-slate-500">{openDeals.length} deal{openDeals.length !== 1 ? 's' : ''}</span>
-      </div>
-      <div className="space-y-3">
-        {openDeals.map((deal) => (
+      {/* Search + Filter bar */}
+      <div className="space-y-3 mb-4">
+        <div className="relative">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by deal ID, description, or address..."
+            className="w-full pl-9 pr-3 py-2 bg-white/[0.04] border border-white/[0.08] rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/40 transition-colors"
+          />
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           <button
-            key={deal.id.toString()}
-            onClick={() => onSelectDeal(deal.id)}
-            className="w-full text-left glass rounded-xl p-4 glass-hover transition-all group"
+            onClick={() => setStateFilter(null)}
+            className={`shrink-0 px-2.5 py-1 text-[11px] font-medium rounded-lg transition-all ${
+              stateFilter === null ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-200 bg-white/[0.03]'
+            }`}
           >
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-sm font-semibold text-white">#{deal.id.toString()}</span>
-                  <span className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded-full bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20">
-                    Open
-                  </span>
+            All ({allDeals.length})
+          </button>
+          {[DealState.Open, DealState.Matched, DealState.NoMatch, DealState.Cancelled, DealState.Expired].map((s) => {
+            const count = allDeals.filter((d) => d.state === s).length;
+            if (count === 0) return null;
+            return (
+              <button
+                key={s}
+                onClick={() => setStateFilter(stateFilter === s ? null : s)}
+                className={`shrink-0 px-2.5 py-1 text-[11px] font-medium rounded-lg transition-all ${
+                  stateFilter === s ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-slate-200 bg-white/[0.03]'
+                }`}
+              >
+                {DEAL_STATE_LABELS[s as DealState]} ({count})
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Results */}
+      {filtered.length === 0 ? (
+        <div className="text-center py-10">
+          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-500/10 flex items-center justify-center">
+            <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+            </svg>
+          </div>
+          <p className="text-sm text-slate-400">No deals match your search.</p>
+          <button
+            onClick={() => { setSearchQuery(''); setStateFilter(null); }}
+            className="text-xs text-indigo-400 hover:text-indigo-300 mt-2"
+          >
+            Clear filters
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((deal) => (
+            <button
+              key={deal.id.toString()}
+              onClick={() => handles(deal)}
+              className="w-full text-left glass rounded-xl p-4 glass-hover transition-all group"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className="text-sm font-semibold text-white">#{deal.id.toString()}</span>
+                    <span className={`inline-flex px-2 py-0.5 text-[11px] font-medium rounded-full ${DEAL_STATE_COLORS[deal.state as DealState]}`}>
+                      {DEAL_STATE_LABELS[deal.state as DealState]}
+                    </span>
+                    {isOpenForSellers(deal) && (
+                      <span className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded-full bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
+                        Open for sellers
+                      </span>
+                    )}
+                    {deal.dealType === DealType.Direct && (
+                      <span className="text-[11px] text-slate-500 font-medium">Direct</span>
+                    )}
+                    {isParticipating(deal) && (
+                      <span className="text-[11px] text-indigo-400 font-medium">You</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-300 truncate mb-2">{deal.description}</p>
+                  <div className="flex items-center gap-3 text-xs text-slate-500">
+                    <span className="font-mono">Buyer: {deal.buyer.slice(0, 6)}...{deal.buyer.slice(-4)}</span>
+                    <span className="font-mono">Seller: {
+                      isOpenForSellers(deal)
+                        ? <span className="text-emerald-400">Open slot</span>
+                        : `${deal.seller.slice(0, 6)}...${deal.seller.slice(-4)}`
+                    }</span>
+                  </div>
                 </div>
-                <p className="text-sm text-slate-300 truncate mb-2">{deal.description}</p>
-                <div className="flex items-center gap-3 text-xs text-slate-500">
-                  <span className="font-mono">Buyer: {deal.buyer.slice(0, 6)}...{deal.buyer.slice(-4)}</span>
-                  <span className="font-mono">Seller: {deal.seller.slice(0, 6)}...{deal.seller.slice(-4)}</span>
+                <div className="flex flex-col items-end gap-1 shrink-0 ml-3">
+                  <span className="text-slate-600 group-hover:text-indigo-400 transition-colors text-lg">→</span>
+                  <a
+                    href={`${explorerUrl}/address/${contractAddress}?dealId=${deal.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-[10px] text-slate-600 hover:text-indigo-400 transition-colors"
+                  >
+                    Explorer ↗
+                  </a>
                 </div>
               </div>
-              <span className="text-slate-600 group-hover:text-indigo-400 transition-colors text-lg mt-1">→</span>
-            </div>
-          </button>
-        ))}
+            </button>
+          ))}
+
+          {/* Load More */}
+          {visibleLimit < Number(totalDeals) && (
+            <button
+              onClick={() => setVisibleLimit((prev) => prev + PAGE_SIZE)}
+              className="w-full py-3 text-sm text-indigo-400 border border-white/[0.06] rounded-xl hover:bg-white/[0.04] transition-colors"
+            >
+              Load More ({Math.min(PAGE_SIZE, Number(totalDeals) - visibleLimit)} more)
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mt-4 text-xs text-slate-600">
+        <span>Showing {filtered.length} of {allDeals.length} deals</span>
+        <span>Total: {totalDeals.toString()}</span>
       </div>
     </div>
   );
@@ -342,6 +473,7 @@ function HeroSection({ onNavigate, showConnect }: { onNavigate: (page: 'dashboar
 
 function DealRow({ dealId, onSelect, currentUser }: { dealId: bigint; onSelect: (id: bigint) => void; currentUser: `0x${string}` }) {
   const contractAddress = useBlindDealAddress();
+  const chainId = useChainId();
   const { data: results } = useReadContracts({
     contracts: [
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealState', args: [dealId] },
@@ -349,6 +481,7 @@ function DealRow({ dealId, onSelect, currentUser }: { dealId: bigint; onSelect: 
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealDescription', args: [dealId] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'isDealSubmitted', args: [dealId] },
       { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealDeadline', args: [dealId] },
+      { address: contractAddress, abi: BLIND_DEAL_ABI, functionName: 'getDealType', args: [dealId] },
     ],
     query: {
       staleTime: 0,
@@ -366,11 +499,17 @@ function DealRow({ dealId, onSelect, currentUser }: { dealId: bigint; onSelect: 
   const description = results[2].result as string;
   const [buyerDone, sellerDone] = results[3].result as [boolean, boolean];
   const deadline = results[4].result as bigint;
+  const dealType = results[5].result as number;
 
   const isBuyer = currentUser.toLowerCase() === buyer.toLowerCase();
   const role = isBuyer ? 'Buyer' : 'Seller';
-
+  const isOpenDeal = dealType === DealType.Open;
+  const isSellerSlotOpen = isOpenDeal && seller === '0x0000000000000000000000000000000000000000';
   const isExpired = deadline > 0n && BigInt(Math.floor(Date.now() / 1000)) > deadline;
+
+  const explorerUrl = chainId === 421614
+    ? 'https://sepolia.arbiscan.io'
+    : 'https://sepolia.etherscan.io';
 
   return (
     <button
@@ -379,7 +518,7 @@ function DealRow({ dealId, onSelect, currentUser }: { dealId: bigint; onSelect: 
     >
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1.5">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <span className="text-sm font-semibold text-white">#{dealId.toString()}</span>
             <span className={`inline-flex px-2 py-0.5 text-[11px] font-medium rounded-full ${DEAL_STATE_COLORS[state as DealState]}`}>
               {DEAL_STATE_LABELS[state as DealState]}
@@ -387,6 +526,14 @@ function DealRow({ dealId, onSelect, currentUser }: { dealId: bigint; onSelect: 
             <span className="text-[11px] text-indigo-400 font-medium px-1.5 py-0.5 rounded bg-indigo-500/10">
               {role}
             </span>
+            {isSellerSlotOpen && (
+              <span className="text-[11px] text-emerald-400 font-medium px-1.5 py-0.5 rounded bg-emerald-500/10">
+                Joinable
+              </span>
+            )}
+            {isOpenDeal && !isSellerSlotOpen && (
+              <span className="text-[11px] text-slate-500 font-medium">Open Deal</span>
+            )}
           </div>
           <p className="text-sm text-slate-300 truncate mb-2">{description}</p>
           <div className="flex items-center gap-3 text-xs text-slate-500">
@@ -405,7 +552,18 @@ function DealRow({ dealId, onSelect, currentUser }: { dealId: bigint; onSelect: 
             )}
           </div>
         </div>
-        <span className="text-slate-600 group-hover:text-indigo-400 transition-colors text-lg mt-1">→</span>
+        <div className="flex flex-col items-end gap-1 shrink-0 ml-3">
+          <span className="text-slate-600 group-hover:text-indigo-400 transition-colors text-lg">→</span>
+          <a
+            href={`${explorerUrl}/address/${contractAddress}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-[10px] text-slate-600 hover:text-indigo-400 transition-colors"
+          >
+            Explorer ↗
+          </a>
+        </div>
       </div>
     </button>
   );

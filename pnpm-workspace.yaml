@@ -2,5 +2,9 @@ packages:
   - 'frontend'
 
 allowBuilds:
+  '@fhenixprotocol/cofhe-contracts': true
+  bufferutil: false
+  esbuild: true
   keccak: true
   secp256k1: false
+  utf-8-validate: false
