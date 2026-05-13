@@ -70,8 +70,8 @@ export default defineConfig({
   resolve: {
     alias: {
       tfhe: tfhePath,
-      // @cofhe/react imports @cofhe/abi — pnpm stores it in frontend's own node_modules
-      '@cofhe/abi': path.resolve(__dirname, 'node_modules/@cofhe/abi'),
+      // @cofhe/react imports @cofhe/abi — installed at root node_modules via workspace
+      '@cofhe/abi': path.resolve(__dirname, '..', 'node_modules/@cofhe/abi'),
     },
   },
   server: {
