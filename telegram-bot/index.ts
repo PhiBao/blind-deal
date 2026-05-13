@@ -110,6 +110,7 @@ function dealUrl(dealId: number, action?: string) {
 async function readDealInfo(dealId: number) {
   const client = arbClient;
   const addr = CONTRACTS[arbitrumSepolia.id];
+  console.log(`[Telegram] Reading deal ${dealId} from ${addr}`);
   const [state, parties, desc, submitted] = await Promise.all([
     client.readContract({ address: addr, abi: BLIND_DEAL_ABI, functionName: 'getDealState', args: [BigInt(dealId)] }),
     client.readContract({ address: addr, abi: BLIND_DEAL_ABI, functionName: 'getDealParties', args: [BigInt(dealId)] }),
@@ -157,6 +158,7 @@ bot.command('help', (ctx) => {
 
 bot.command('list', async (ctx) => {
   try {
+    console.log(`[Telegram] /list from ${ctx.chat.id}`);
     const count = await arbClient.readContract({
       address: CONTRACTS[arbitrumSepolia.id],
       abi: BLIND_DEAL_ABI,
@@ -164,6 +166,7 @@ bot.command('list', async (ctx) => {
     });
 
     const total = Number(count);
+    console.log(`[Telegram] dealCount = ${total}`);
     if (total === 0) {
       return ctx.reply('No deals yet. Be the first to /create one!');
     }
@@ -193,8 +196,11 @@ bot.command('list', async (ctx) => {
       .map((r) => r.value);
 
     if (openDeals.length === 0) {
+      console.log(`[Telegram] /list -> 0 open deals out of ${total} total`);
       return ctx.reply('No open deals found. Be the first to /create one!');
     }
+
+    console.log(`[Telegram] /list -> ${openDeals.length} open deals`);
 
     const lines = openDeals.map((d) => {
       const [buyerDone, sellerDone] = d.submitted;
@@ -370,6 +376,7 @@ async function pollEvents() {
     const currentBlock = await arbClient.getBlockNumber();
     if (lastCheckedBlock === 0n) {
       lastCheckedBlock = currentBlock;
+      console.log(`[Telegram] Event polling started at block ${currentBlock}`);
       return;
     }
     if (currentBlock <= lastCheckedBlock) return;
@@ -450,9 +457,13 @@ setInterval(pollEvents, 15_000);
 
 // ── Start ───────────────────────────────────────────────────────
 
+console.log(`[Telegram] Using BlindDeal at ${CONTRACTS[arbitrumSepolia.id]} on Arbitrum Sepolia`);
+console.log(`[Telegram] FRONTEND_URL = ${FRONTEND_URL}`);
+
 async function startBot(retries = 8, delay = 10000) {
   try {
-    await bot.launch();
+    // Drop pending updates on retry to avoid reprocessing old commands
+    await bot.launch({ dropPendingUpdates: retries < 8 });
     console.log('BlindDeal Telegram bot started');
   } catch (err: any) {
     const is409 = err?.response?.error_code === 409 || (err?.message || '').includes('409');
