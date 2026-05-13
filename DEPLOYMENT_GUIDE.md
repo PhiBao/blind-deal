@@ -3,23 +3,23 @@
 **Architecture**
 
 ```
-┌─────────────────────────┐     ┌────────────────────────────┐
-│   Vercel (serverless)   │     │   Render (background worker)│
-│                         │     │                            │
-│  blind-deal.vercel.app   │     │  blinddeal-bot.onrender.com │
-│  ┌───────────────────┐  │     │  ┌──────────────────────┐  │
-│  │ Frontend (Vite)   │  │     │  │ MCP Server :3001     │  │
-│  │ → React + wagmi   │  │     │  │ → /mcp (JSON-RPC)   │  │
-│  │ → Tailwind CSS    │  │     │  │ → /health            │  │
-│  └───────────────────┘  │     │  ├──────────────────────┤  │
-│  ┌───────────────────┐  │     │  │ Telegram Bot         │  │
-│  │ API (serverless)  │  │     │  │ → @BlindDealBot      │  │
-│  │ → POST /api/escrow/ │  │     │  │ → event polling 15s │  │
-│  │   create          │  │     │  └──────────────────────┘  │
-│  │   fund            │  │     └────────────────────────────┘
-│  │   redeem          │  │
-│  └───────────────────┘  │
-└─────────────────────────┘
+┌──────────────────────────┐     ┌────────────────────────────────┐
+│   Vercel (serverless)    │     │   Render / Fly.io (Web Service)│
+│                          │     │                                │
+│  blind-deal.vercel.app   │     │  blind-deal.onrender.com       │
+│  ┌────────────────────┐  │     │  ┌──────────────────────────┐  │
+│  │ Frontend (Vite)    │  │     │  │ MCP Server :3001         │  │
+│  │ → React + wagmi    │  │     │  │ → /mcp (JSON-RPC)        │  │
+│  │ → Tailwind CSS     │  │     │  │ → /health                │  │
+│  └────────────────────┘  │     │  ├──────────────────────────┤  │
+│  ┌────────────────────┐  │     │  │ Telegram Bot             │  │
+│  │ API (serverless)   │  │     │  │ → @BlindDealBot          │  │
+│  │ → POST /api/escrow/│  │     │  │ → event polling 15s      │  │
+│  │   create           │  │     │  └──────────────────────────┘  │
+│  │   fund             │  │     └────────────────────────────────┘
+│  │   redeem           │  │
+│  └────────────────────┘  │
+└──────────────────────────┘
 ```
 
 ---
@@ -88,11 +88,10 @@ Alternatively, connect the GitHub repo in Vercel dashboard:
 | Variable | Value | Notes |
 |---|---|---|
 | `PRIVATE_KEY` | `0x...` | Hot wallet for escrow txs (Arb Sepolia) |
-| `ARBITRUM_SEPOLIA_RPC_URL` | `https://sepolia-rollup.arbitrum.io/rpc` | Or private RPC |
 | `VITE_SEPOLIA_RPC_URL` | `https://ethereum-sepolia.publicnode.com` | Exposed to frontend |
 | `VITE_ARBITRUM_SEPOLIA_RPC_URL` | `https://sepolia-rollup.arbitrum.io/rpc` | Exposed to frontend |
 | `VITE_TELEGRAM_BOT_USERNAME` | `BlindDealBot` | Bot username for deep-links |
-| `VITE_MCP_ENDPOINT` | `https://blinddeal-bot.onrender.com/mcp` | → Render MCP endpoint |
+| `VITE_MCP_ENDPOINT` | `https://blind-deal.onrender.com/mcp` | → Render MCP endpoint |
 
 ### How the API proxy works
 
@@ -119,11 +118,13 @@ server: {
 
 ---
 
-## Part 2: Render — MCP Server + Telegram Bot
+## Part 2: Render/Fly.io — MCP Server + Telegram Bot
 
 ### Architecture
 
-The MCP Server and Telegram Bot run as a single **Background Worker** on Render. The `start-bot.ts` script spawns both as child processes with auto-restart on crash.
+The MCP Server and Telegram Bot run as a single **Web Service** process. The `start-bot.ts` script spawns both as child processes with auto-restart on crash.
+
+Render's free Web Service spins down after 15 minutes of inactivity. The health check + GitHub Actions keepalive cron prevent this. For always-on alternatives, see [Options](#options) below.
 
 ```
 start-bot.ts
@@ -131,46 +132,36 @@ start-bot.ts
   └── Telegram Bot       ← long-polling contract events every 15s
 ```
 
-### render.yaml (already exists)
+### Render One-Click Deploy
+
+**render.yaml:**
 
 ```yaml
 services:
-  - type: worker
+  - type: web                        # Web Service (free), not worker
     name: blinddeal-bot
     env: node
-    region: oregon
     plan: free
-    branch: main
     buildCommand: pnpm install --frozen-lockfile
     startCommand: npx tsx start-bot.ts all
+    healthCheckPath: /health
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false        # Set in Render dashboard
-      - key: ARBITRUM_SEPOLIA_RPC_URL
-        sync: false
-      - key: SEPOLIA_RPC_URL
-        sync: false
-      - key: PRIVATE_KEY
-        sync: false
-      - key: FRONTEND_URL
-        value: https://blind-deal.vercel.app
       - key: MCP_PORT
         value: "3001"
+      - key: FRONTEND_URL
+        value: https://blind-deal.vercel.app
+      # Set in dashboard: TELEGRAM_BOT_TOKEN, VITE_ARBITRUM_SEPOLIA_RPC_URL, VITE_SEPOLIA_RPC_URL
 ```
 
-### One-Click Deploy on Render
-
-**Option A — Blueprint (render.yaml):**
+**Option A — Blueprint:**
 ```bash
-# Push to GitHub, then:
+# Push render.yaml to GitHub, then:
 https://render.com/deploy?repo=https://github.com/YOUR_USERNAME/blinddeal
 ```
 
 **Option B — Manual:**
-1. Render Dashboard → **New Background Worker**
-2. Connect GitHub repo `blinddeal`
+1. Render Dashboard → **New Web Service**
+2. Connect GitHub repo
 3. **Root Directory** → `/` (whole repo)
 4. **Build Command** → `pnpm install --frozen-lockfile`
 5. **Start Command** → `npx tsx start-bot.ts all`
@@ -178,45 +169,29 @@ https://render.com/deploy?repo=https://github.com/YOUR_USERNAME/blinddeal
 7. Add environment variables (see below)
 8. **Deploy**
 
-### Render Environment Variables
+### Render Health + Keepalive
 
-| Variable | Value | Notes |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | (secret) | From @BotFather |
-| `ARBITRUM_SEPOLIA_RPC_URL` | `https://sepolia-rollup.arbitrum.io/rpc` | Or private RPC |
-| `SEPOLIA_RPC_URL` | `https://ethereum-sepolia.publicnode.com` | |
-| `PRIVATE_KEY` | (optional) | Only needed if bot submits txs |
-| `FRONTEND_URL` | `https://blind-deal.vercel.app` | For deep-links |
-| `VITE_TELEGRAM_BOT_USERNAME` | `BlindDealBot` | |
-| `MCP_PORT` | `3001` | |
+Render's free Web Service spins down after 15 min without traffic. Two safeguards:
 
-### Render Health Checks
+1. **`healthCheckPath: /health`** — Render pings this, which counts as traffic
+2. **GitHub Actions keepalive** (`.github/workflows/keepalive.yml`) — pings every 10 min
 
-The MCP Server exposes `/health` for monitoring:
+The keepalive + Render's own health check should keep the service alive indefinitely. If it does spin down, a single request (e.g., Telegram /list command) wakes it in ~30s.
 
-```bash
-curl https://blinddeal-bot.onrender.com/health
-# → {"status":"ok","name":"BlindDeal MCP Server","version":"1.0.0"}
-```
+### Options — Free Hosting for MCP + Telegram
 
-### Keeping Render Free Tier Alive
+Render dropped free Background Workers. Here are alternatives using **Web Service** (free):
 
-Render free workers spin down after 15 min of inactivity. To keep the bot + MCP alive:
+| Provider | Free Tier | Always-On? | Notes |
+|---|---|---|---|
+| **Render** (this guide) | Web Service, free | Spins down after 15min idle | Health check + keepalive cron usually prevent this |
+| **Fly.io** | 3 shared VMs, 256MB RAM, 3GB storage | ✅ Yes | Best for production-demo. No spin-down. |
+| **Railway** | $5 credit/month | ✅ While credit lasts | ~$0.002/hr for a tiny VM, runs ~2500h free |
+| **Koyeb** | 1 web service, always-on | ✅ Yes | Free tier stays awake. 1GB RAM. |
+| **Google Cloud Run** | 2M requests/month, always-on possible | ✅ With min-instance=1 | Requires credit card. Costs ~$0 if traffic is low. |
+| **Okteto** | Free Kubernetes namespace | ✅ Yes | 8GB RAM, 4 CPUs. Dev-focused. |
 
-1. **Set up a cron job** (e.g., GitHub Actions, cron-job.org, UptimeRobot) to ping `/health` every 10 min
-2. **Render's own health check** — set the health check path to `/health` in the dashboard
-
-GitHub Action example (`.github/workflows/keepalive.yml`):
-
-```yaml
-on:
-  schedule: [{ cron: "*/10 * * * *" }]
-jobs:
-  ping:
-    runs-on: ubuntu-latest
-    steps:
-      - run: curl -s https://blinddeal-bot.onrender.com/health
-```
+**Recommendation:** Start with **Render Web Service** (simplest, already configured). If spin-down becomes an issue, switch to **Fly.io** (always-on, similar deploy flow).
 
 ---
 
@@ -255,32 +230,28 @@ vercel --prod
 #    - Deploy
 
 # 3. Set VITE_MCP_ENDPOINT to your Render URL
-#    In Vercel dashboard: VITE_MCP_ENDPOINT=https://blinddeal-bot.onrender.com/mcp
+#    In Vercel dashboard: VITE_MCP_ENDPOINT=https://blind-deal.onrender.com/mcp
 
 # 4. Re-deploy frontend on Vercel (so it picks up the env change)
 vercel --prod
 
 # 5. Verify:
 #    - Open https://blind-deal.vercel.app
-#    - Check MCP health: https://blinddeal-bot.onrender.com/health
+#    - Check MCP health: https://blind-deal.onrender.com/health
 #    - Try /list in Telegram bot
 ```
 
 ### Environment Checklist
 
 | Where | Variable | Required |
-|---|---|---|
+|---|---|---|---|
 | Vercel | `PRIVATE_KEY` | ✅ For escrow API |
-| Vercel | `ARBITRUM_SEPOLIA_RPC_URL` | ✅ |
 | Vercel | `VITE_SEPOLIA_RPC_URL` | ✅ |
 | Vercel | `VITE_ARBITRUM_SEPOLIA_RPC_URL` | ✅ |
 | Vercel | `VITE_TELEGRAM_BOT_USERNAME` | ✅ |
 | Vercel | `VITE_MCP_ENDPOINT` | ✅ |
 | Render | `TELEGRAM_BOT_TOKEN` | ✅ |
-| Render | `ARBITRUM_SEPOLIA_RPC_URL` | ✅ |
-| Render | `SEPOLIA_RPC_URL` | ✅ |
 | Render | `FRONTEND_URL` | ✅ |
-| Render | `PRIVATE_KEY` | Optional |
 
 ---
 

@@ -48,12 +48,12 @@ const STATE_LABELS = ['Open', 'Matched', 'No Match', 'Cancelled', 'Expired'];
 
 const arbClient = createPublicClient({
   chain: arbitrumSepolia,
-  transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL),
+  transport: http(process.env.VITE_ARBITRUM_SEPOLIA_RPC_URL),
 });
 
 const ethClient = createPublicClient({
   chain: sepolia,
-  transport: http(process.env.SEPOLIA_RPC_URL),
+  transport: http(process.env.VITE_SEPOLIA_RPC_URL),
 });
 
 function getClient(chainId: number) {
@@ -460,18 +460,21 @@ setInterval(pollEvents, 15_000);
 console.log(`[Telegram] Using BlindDeal at ${CONTRACTS[arbitrumSepolia.id]} on Arbitrum Sepolia`);
 console.log(`[Telegram] FRONTEND_URL = ${FRONTEND_URL}`);
 
-async function startBot(retries = 8, delay = 10000) {
+async function startBot(retried = false) {
   try {
-    // Drop pending updates on retry to avoid reprocessing old commands
-    await bot.launch({ dropPendingUpdates: retries < 8 });
+    await bot.launch({ dropPendingUpdates: retried });
     console.log('BlindDeal Telegram bot started');
   } catch (err: any) {
     const is409 = err?.response?.error_code === 409 || (err?.message || '').includes('409');
-    if (is409 && retries > 0) {
-      console.log(`Telegram 409 conflict (previous instance still connected). Retrying in ${delay/1000}s... (${retries} tries left)`);
-      await new Promise((r) => setTimeout(r, delay));
-      return startBot(retries - 1, delay);
+    if (is409 && !retried) {
+      console.log('Telegram 409 conflict — old polling session still active.');
+      console.log('Waiting 60s for it to expire...');
+      await new Promise((r) => setTimeout(r, 60000));
+      return startBot(true);
     }
+    throw err;
+  }
+}
     throw err;
   }
 }

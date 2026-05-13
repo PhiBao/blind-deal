@@ -39,7 +39,7 @@ const CONTRACTS: Record<number, `0x${string}`> = {
 
 const client = createPublicClient({
   chain: CHAIN,
-  transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL),
+  transport: http(process.env.VITE_ARBITRUM_SEPOLIA_RPC_URL),
 });
 
 const CONTRACT = CONTRACTS[arbitrumSepolia.id];

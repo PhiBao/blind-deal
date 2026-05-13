@@ -4,7 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 
 const arbSepolia = defineChain({
   id: 421614, name: 'Arbitrum Sepolia', network: 'arb-sepolia',
-  rpcUrls: { default: { http: [process.env.ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc'] } },
+  rpcUrls: { default: { http: [process.env.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc'] } },
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
 });
 
@@ -29,7 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`);
-    const rpcUrl = process.env.ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc';
+    const rpcUrl = process.env.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc';
     const transport = http(rpcUrl);
     const publicClient = createPublicClient({ chain: arbSepolia, transport });
     const walletClient = createWalletClient({ account, chain: arbSepolia, transport });

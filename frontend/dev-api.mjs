@@ -38,13 +38,13 @@ const arbSepolia = defineChain({
   id: 421614,
   name: 'Arbitrum Sepolia',
   network: 'arb-sepolia',
-  rpcUrls: { default: { http: [process.env.ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc'] } },
+  rpcUrls: { default: { http: [process.env.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc'] } },
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
 });
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const account = privateKeyToAccount(PRIVATE_KEY);
-const rpcUrl = process.env.ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc';
+const rpcUrl = process.env.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc';
 const transport = viemHttp(rpcUrl);
 
 const publicClient = createPublicClient({ chain: arbSepolia, transport });

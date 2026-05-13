@@ -20,9 +20,9 @@ services:
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: ARBITRUM_SEPOLIA_RPC_URL
+      - key: VITE_ARBITRUM_SEPOLIA_RPC_URL
         sync: false
-      - key: SEPOLIA_RPC_URL
+      - key: VITE_SEPOLIA_RPC_URL
         sync: false
       - key: FRONTEND_URL
         value: https://blind-deal.vercel.app

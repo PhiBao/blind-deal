@@ -262,12 +262,12 @@ The `@reineira-os/sdk` uses `@cofhe/sdk@0.5.2` internally, which requires Node.j
 
 After funding/redeeming, tx hashes are displayed with clickable links to `sepolia.arbiscan.io` for on-chain verification.
 
-### Contracts (v5)
+### Contracts
 
 | Contract | Arbitrum Sepolia | Ethereum Sepolia | Purpose |
 |----------|------------------|------------------|---------|
-| **BlindDeal** | [`0xabf1...A65c`](https://sepolia.arbiscan.io/address/0xabf1161bEcf179A4Cb6604387273931E1d76A65c) | [`0xBed2...Bf10`](https://sepolia.etherscan.io/address/0xBed299e6e40233bD4Cac7bd472356F16e99EBf10) | Core FHE negotiation |
-| **BlindDealResolver** | [`0x2248...5250`](https://sepolia.arbiscan.io/address/0x22480315309C85cdc2648cc6eD897ee96b755250) | [`0x6397...a53E`](https://sepolia.etherscan.io/address/0x639794F956A4b2CC2C62a5DF9eE71B29a7C7a53E) | Condition resolver |
+| **BlindDeal** | [`0x3254...3995`](https://sepolia.arbiscan.io/address/0x3254538efD1F186640daf059C6Ff35a08bf33995) | [`0x36a1...Bd49`](https://sepolia.etherscan.io/address/0x36a155431C4525CEEdEB73A461372fB127A0Bd49) | Core FHE negotiation |
+| **BlindDealResolver** | [`0xBed2...Bf10`](https://sepolia.arbiscan.io/address/0xBed299e6e40233bD4Cac7bd472356F16e99EBf10) | [`0x976f...37C`](https://sepolia.etherscan.io/address/0x976fE936F57DE1a6dB5bd97d90874B76876C137C) | Condition resolver |
 | **ConfidentialEscrow** | [`0xbe1E...9A6`](https://sepolia.arbiscan.io/address/0xbe1EB78504B71beEE1b33D3E3D367A2F9a549A6) | — | Privara escrow (holds ConfUSDC) |
 | **ConfidentialUSDC** | [`0x42E4...48a`](https://sepolia.arbiscan.io/address/0x42E47f9bA89712C317f60A72C81A610A2b68c48a) | — | FHE-wrapped USDC token |
 
@@ -314,14 +314,14 @@ v5 fix: `createDecryptTask` wrapped in `try/catch` because the Sepolia TASK_MANA
 
 ## Live Demo
 
-### Deployed (v5)
+### Deployed
 
 | Component | URL |
 |-----------|-----|
 | **Frontend** | Vercel deployment (Arbitrum Sepolia + Ethereum Sepolia) |
-| **BlindDeal (Arb)** | [`0xabf1...A65c`](https://sepolia.arbiscan.io/address/0xabf1161bEcf179A4Cb6604387273931E1d76A65c) |
-| **Resolver (Arb)** | [`0x2248...5250`](https://sepolia.arbiscan.io/address/0x22480315309C85cdc2648cc6eD897ee96b755250) |
-| **BlindDeal (Eth)** | [`0xBed2...Bf10`](https://sepolia.etherscan.io/address/0xBed299e6e40233bD4Cac7bd472356F16e99EBf10) |
+| **BlindDeal (Arb)** | [`0x3254...3995`](https://sepolia.arbiscan.io/address/0x3254538efD1F186640daf059C6Ff35a08bf33995) |
+| **Resolver (Arb)** | [`0xBed2...Bf10`](https://sepolia.arbiscan.io/address/0xBed299e6e40233bD4Cac7bd472356F16e99EBf10) |
+| **BlindDeal (Eth)** | [`0x36a1...Bd49`](https://sepolia.etherscan.io/address/0x36a155431C4525CEEdEB73A461372fB127A0Bd49) |
 
 ### Verified On-Chain
 
