@@ -43,8 +43,8 @@ test/                Hardhat tests with @cofhe/hardhat-plugin mock FHE
 
 | Chain | BlindDeal | Resolver |
 |---|---|---|
-| Arbitrum Sepolia | `0xabf1161bEcf179A4Cb6604387273931E1d76A65c` | `0x22480315309C85cdc2648cc6eD897ee96b755250` |
-| Ethereum Sepolia | `0xBed299e6e40233bD4Cac7bd472356F16e99EBf10` | `0x639794F956A4b2CC2C62a5DF9eE71B29a7C7a53E` |
+| Arbitrum Sepolia | `0x3254538efD1F186640daf059C6Ff35a08bf33995` | `0xBed299e6e40233bD4Cac7bd472356F16e99EBf10` |
+| Ethereum Sepolia | `0x36a155431C4525CEEdEB73A461372fB127A0Bd49` | `0x976fE936F57DE1a6dB5bd97d90874B76876C137C` |
 
 `createDecryptTask` wrapped in `try/catch` because the Sepolia TASK_MANAGER doesn't support this function.
 

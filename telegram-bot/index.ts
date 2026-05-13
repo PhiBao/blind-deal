@@ -35,8 +35,8 @@ const BLIND_DEAL_ABI = parseAbi([
 ] as const);
 
 const CONTRACTS: Record<number, `0x${string}`> = {
-  [arbitrumSepolia.id]: '0xabf1161bEcf179A4Cb6604387273931E1d76A65c',
-  [sepolia.id]: '0xBed299e6e40233bD4Cac7bd472356F16e99EBf10',
+  [arbitrumSepolia.id]: '0x3254538efD1F186640daf059C6Ff35a08bf33995',
+  [sepolia.id]: '0x36a155431C4525CEEdEB73A461372fB127A0Bd49',
 };
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://blind-deal.vercel.app';
@@ -450,7 +450,7 @@ setInterval(pollEvents, 15_000);
 
 // ── Start ───────────────────────────────────────────────────────
 
-async function startBot(retries = 6, delay = 10000) {
+async function startBot(retries = 8, delay = 10000) {
   try {
     await bot.launch();
     console.log('BlindDeal Telegram bot started');
@@ -470,5 +470,5 @@ startBot().catch((err) => {
   process.exit(1);
 });
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', async () => { await bot.stop('SIGINT'); process.exit(0); });
+process.once('SIGTERM', async () => { await bot.stop('SIGTERM'); process.exit(0); });

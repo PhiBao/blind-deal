@@ -33,8 +33,8 @@ const BLIND_DEAL_ABI = parseAbi([
 ] as const);
 
 const CONTRACTS: Record<number, `0x${string}`> = {
-  [arbitrumSepolia.id]: (process.env.BLIND_DEAL_ADDRESS as `0x${string}`) || '0xabf1161bEcf179A4Cb6604387273931E1d76A65c',
-  [sepolia.id]: '0xBed299e6e40233bD4Cac7bd472356F16e99EBf10',
+  [arbitrumSepolia.id]: (process.env.BLIND_DEAL_ADDRESS as `0x${string}`) || '0x3254538efD1F186640daf059C6Ff35a08bf33995',
+  [sepolia.id]: '0x36a155431C4525CEEdEB73A461372fB127A0Bd49',
 };
 
 const client = createPublicClient({
@@ -67,6 +67,18 @@ async function startHttp() {
 
   // Raw JSON-RPC handler — avoids SDK Streamable HTTP stateless mode bugs
   const server2 = http.createServer(async (req: any, res: any) => {
+    // CORS headers (Vercel frontend calls Render MCP)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+
+    // Handle preflight
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     // Health check
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
