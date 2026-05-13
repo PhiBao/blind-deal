@@ -457,7 +457,7 @@ Full deployment guide in [`DEPLOYMENT_GUIDE.md`](./DEPLOYMENT_GUIDE.md).
 | Component | Platform | Service |
 |---|---|---|
 | Frontend + Escrow API | **Vercel** | Serverless (auto-scaling) |
-| MCP Server + Telegram Bot | **Render** | Background Worker (free tier) |
+| MCP Server + Telegram Bot | **Render** (Web Service) or **Fly.io** | Free tier, health check + keepalive |
 
 ### Quick Deploy
 
@@ -466,8 +466,8 @@ Full deployment guide in [`DEPLOYMENT_GUIDE.md`](./DEPLOYMENT_GUIDE.md).
 cd frontend
 vercel --prod
 
-# Render (MCP + Telegram)
-# Import repo as Background Worker → start: npx tsx start-bot.ts all
+# Render (MCP + Telegram via Web Service)
+# Import repo as Web Service → start: npx tsx start-bot.ts all
 ```
 
 Environment variables reference and step-by-step instructions in [`DEPLOYMENT_GUIDE.md`](./DEPLOYMENT_GUIDE.md).

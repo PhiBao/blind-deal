@@ -1,1 +1,1 @@
-worker: npx tsx start-bot.ts all
+web: npx tsx start-bot.ts all

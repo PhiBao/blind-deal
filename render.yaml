@@ -1,11 +1,14 @@
-# render.yaml — BlindDeal Background Worker
+# render.yaml — BlindDeal Web Service
 # Deploy: https://render.com/deploy?repo=https://github.com/YOUR_USERNAME/blinddeal
 #
-# This runs the MCP Server + Telegram Bot as a single worker process.
-# start-bot.ts spawns both as child processes with auto-restart.
+# Runs MCP Server + Telegram Bot as a single process.
+# Web Service (free) — Render dropped free Background Workers.
+# Health check + keepalive cron prevent 15-min idle spin-down.
+#
+# Free-tier alternatives for always-on: Fly.io (3 free VMs), Railway ($5/mo credit)
 
 services:
-  - type: worker
+  - type: web
     name: blinddeal-bot
     env: node
     region: oregon
@@ -15,19 +18,13 @@ services:
     startCommand: npx tsx start-bot.ts all
     healthCheckPath: /health
     envVars:
-      - key: NODE_ENV
-        value: production
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: ARBITRUM_SEPOLIA_RPC_URL
         sync: false
       - key: SEPOLIA_RPC_URL
         sync: false
-      - key: PRIVATE_KEY
-        sync: false
       - key: FRONTEND_URL
         value: https://blind-deal.vercel.app
-      - key: VITE_TELEGRAM_BOT_USERNAME
-        value: BlindDealBot
       - key: MCP_PORT
         value: "3001"

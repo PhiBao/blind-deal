@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping MCP Health
-        run: curl -sf https://blinddeal-bot.onrender.com/health
+        run: curl -sf https://blind-deal.onrender.com/health
         continue-on-error: true
       - name: Ping Frontend
         run: curl -sf https://blind-deal.vercel.app
