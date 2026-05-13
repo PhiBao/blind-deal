@@ -15,7 +15,9 @@ interface ToolResult {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const _importMeta = import.meta as any;
-const MCP_ENDPOINT = (_importMeta.env && _importMeta.env.VITE_MCP_ENDPOINT) || '/mcp';
+// VITE_MCP_ENDPOINT overrides; fallback to Render URL (CORS enabled).
+// Local dev: Render URL works (CORS allows it) OR Vite proxy at /mcp.
+const MCP_ENDPOINT = (_importMeta.env && _importMeta.env.VITE_MCP_ENDPOINT) || 'https://blind-deal.onrender.com/mcp';
 
 async function mcpCall(method: string, params: object = {}) {
   const res = await fetch(MCP_ENDPOINT, {
