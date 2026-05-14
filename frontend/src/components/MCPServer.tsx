@@ -220,11 +220,6 @@ export function MCPServer({ onNavigate, currentPage }: MCPServerProps) {
             <p className="text-xs font-medium text-sky-400 mb-2">Cursor / Windsurf</p>
             <p className="text-[11px] text-slate-500 mb-2">Add MCP server in Settings → MCP → Point to <code className="text-violet-300">npx tsx mcp-server/index.ts</code></p>
           </div>
-
-          <div className="p-3 bg-white/[0.03] rounded-lg">
-            <p className="text-xs font-medium text-amber-400 mb-2">Render Deployment</p>
-            <p className="text-[11px] text-slate-500">Deploy as Background Worker: <code className="text-violet-300">npx tsx start-bot.ts mcp</code></p>
-          </div>
         </div>
       </div>
     </div>
