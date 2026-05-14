@@ -600,14 +600,7 @@ npx hardhat create-deal --network arb-sepolia \
 - [x] **AI Agent task** — `npx hardhat agent --price 500 --network arb-sepolia` discovers Open deals, joins, submits FHE price
 - [x] **34 Hardhat tests pass**, TypeScript clean, Vite build succeeds
 
-### Wave 5
-
-- [ ] MCP client integration — "Connect Agent" panel on `/mcp` page, test Claude Desktop connection
-- [ ] Landing page — `/` page with protocol explanation + wallet CTA
-- [ ] Browser push notifications — deal state changes in-browser (not just Telegram)
-- [ ] On-chain reputation — track per-address deal completion rate, show on deal cards
-
-### Wave 5 — Agent + Advanced Features (May 11–Jun 1)
+### Wave 5 — Agent + Advanced Features
 
 - [ ] AI negotiation agent: auto-suggest price ranges based on market data
 - [ ] Agent bidding: delegate encrypted price submission to an AI agent
