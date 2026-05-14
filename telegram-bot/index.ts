@@ -475,9 +475,6 @@ async function startBot(retried = false) {
     throw err;
   }
 }
-    throw err;
-  }
-}
 
 startBot().catch((err) => {
   console.error('Failed to start bot:', err);
